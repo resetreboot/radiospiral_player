@@ -203,8 +203,10 @@ func main() {
 		}
 	})
 
+	header := container.NewCenter(radiospiral_label)
+
 	window.SetContent(container.NewVBox(
-		radiospiral_label,
+		header,
 		layout.NewSpacer(),
 		nowplaying_label,
 		play_button,
