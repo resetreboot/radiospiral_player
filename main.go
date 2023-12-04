@@ -1,5 +1,17 @@
 package main
 
+/*
+ * This app is basically a frontend using MPlayer to stream, so we don't have to deal with
+ * complicated streaming stuff when there's usually a perfectly working program that will
+ * do this better than we can ever do.
+ *
+ * We keep control of MPlayer through the MPlayer object and pipes to send it commands to
+ * play, stop and which is the URL we want to stream (usually, RadioSpiral's).
+ *
+ * There is also a goroutine that checks the broadcast information every minute, updates
+ * the GUI with the currently playing information and also the next show coming up.
+ */
+
 import (
 	"bufio"
 	"encoding/json"
@@ -150,9 +162,11 @@ func (player *MPlayer) DecVolume() {
 func main() {
 	RADIOSPIRAL_JSON_ENDPOINT := "https://radiospiral.net/wp-json/radio/broadcast"
 
+	// Create the status channel, to read from MPlayer and the pipe to send commands to it
 	status_chan := make(chan string)
 	pipe_chan := make(chan io.ReadCloser)
 
+	// Create our MPlayer instance
 	mplayer := MPlayer{player_name: "mplayer", is_playing: false, pipe_chan: pipe_chan}
 
 	// Process the output of Mplayer here
@@ -172,11 +186,13 @@ func main() {
 		}
 	}()
 
+	// Create our app and window
 	app := app.New()
 	window := app.NewWindow("RadioSpiral")
 
 	window.Resize(fyne.NewSize(400, 600))
 
+	// Keep the status of the player
 	play_status := false
 
 	radiospiral_label := widget.NewLabel("RadioSpiral")
@@ -187,6 +203,9 @@ func main() {
 
 	var play_button *widget.Button
 	play_button = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
+		// Here we control each time the button is pressed and update its
+		// appearance anytime it is clicked. We make the player start playing
+		// or pause.
 		if !mplayer.is_playing {
 			play_button.SetIcon(theme.MediaPlayIcon())
 			mplayer.Play("https://radiospiral.radio/stream.mp3")
@@ -203,8 +222,12 @@ func main() {
 		}
 	})
 
+	// TODO: Check how can we make this area RadioSpiral blue
+	// TODO: Add RadioSpiral icon
+	// TODO: Add RadioSpiral's font
 	header := container.NewCenter(radiospiral_label)
 
+	// Layout the whole thing
 	window.SetContent(container.NewVBox(
 		header,
 		layout.NewSpacer(),
@@ -212,6 +235,9 @@ func main() {
 		play_button,
 	))
 
+	// Now that everything is laid out, we can start this
+	// small goroutine every minute, retrieve the stream data
+	// and the shows data, update the GUI accordingly
 	go func() {
 		for {
 			fmt.Println("Retrieving broadcast data")
@@ -228,6 +254,9 @@ func main() {
 		}
 	}()
 
+	// Showtime!
 	window.ShowAndRun()
+
+	// Window has been closed, make sure that MPlayer closes too
 	mplayer.Close()
 }
