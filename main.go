@@ -8,6 +8,7 @@ import (
 
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -126,21 +127,32 @@ func main() {
 	app := app.New()
 	window := app.NewWindow("RadioSpiral")
 
+	play_status := false
+
 	radiospiral_label := widget.NewLabel("RadioSpiral")
-	nowplaying_label := widget.NewLabel("Not Playing")
+	nowplaying_label := widget.NewLabel("Author - Title")
+	var play_button *widget.Button
+	play_button = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
+		if !mplayer.is_playing {
+			play_button.SetIcon(theme.MediaPlayIcon())
+			mplayer.Play("http://radiospiral.radio/stream.mp3")
+			play_status = true
+		} else {
+			if play_status {
+				play_status = false
+				play_button.SetIcon(theme.MediaPauseIcon())
+			} else {
+				play_status = true
+				play_button.SetIcon(theme.MediaPlayIcon())
+			}
+			mplayer.Pause()
+		}
+	})
 
 	window.SetContent(container.NewVBox(
 		radiospiral_label,
 		nowplaying_label,
-		widget.NewButton("Play", func() {
-			if !mplayer.is_playing {
-				nowplaying_label.SetText("Playing!")
-				mplayer.Play("http://radiospiral.radio/stream.mp3")
-			} else {
-				nowplaying_label.SetText("Stopped")
-				mplayer.Pause()
-			}
-		}),
+		play_button,
 	))
 
 	window.ShowAndRun()
