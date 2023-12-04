@@ -133,10 +133,16 @@ func main() {
 		radiospiral_label,
 		nowplaying_label,
 		widget.NewButton("Play", func() {
-			nowplaying_label.SetText("Playing!")
-			mplayer.Play("http://radiospiral.radio/stream.mp3")
+			if !mplayer.is_playing {
+				nowplaying_label.SetText("Playing!")
+				mplayer.Play("http://radiospiral.radio/stream.mp3")
+			} else {
+				nowplaying_label.SetText("Stopped")
+				mplayer.Pause()
+			}
 		}),
 	))
 
 	window.ShowAndRun()
+	mplayer.Close()
 }
