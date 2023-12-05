@@ -1,3 +1,6 @@
+//go:generate fyne bundle -o bundle.go res/icon.png
+//go:generate fyne bundle -o bundle.go -append res/header.png
+
 package main
 
 /*
@@ -199,13 +202,7 @@ func main() {
 	window := app.NewWindow("RadioSpiral Player")
 
 	window.Resize(fyne.NewSize(400, 600))
-	icon, err := fyne.LoadResourceFromPath("./res/icon.png")
-	if err != nil {
-		log.Println("[ERROR] Couldn't load the app icon!")
-		log.Println(err)
-	} else {
-		window.SetIcon(icon)
-	}
+	window.SetIcon(resourceIconPng)
 
 	// Keep the status of the player
 	playStatus := false
@@ -214,7 +211,7 @@ func main() {
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
 
 	// Header section
-	radioSpiralImage := canvas.NewImageFromFile("./res/header.png")
+	radioSpiralImage := canvas.NewImageFromResource(resourceHeaderPng)
 	header := container.NewCenter(radioSpiralImage)
 
 	// Next show section
