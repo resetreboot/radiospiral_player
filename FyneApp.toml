@@ -1,0 +1,8 @@
+Website = "https://radiospiral.net"
+
+[Details]
+Icon = "res/icon.png"
+Name = "RadioSpiral Player"
+ID = "net.radiospiral.player"
+Version = "1.0.0"
+Build = 1

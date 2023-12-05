@@ -196,9 +196,16 @@ func main() {
 
 	// Create our app and window
 	app := app.New()
-	window := app.NewWindow("RadioSpiral")
+	window := app.NewWindow("RadioSpiral Player")
 
 	window.Resize(fyne.NewSize(400, 600))
+	icon, err := fyne.LoadResourceFromPath("./res/icon.png")
+	if err != nil {
+		log.Println("[ERROR] Couldn't load the app icon!")
+		log.Println(err)
+	} else {
+		window.SetIcon(icon)
+	}
 
 	// Keep the status of the player
 	playStatus := false
