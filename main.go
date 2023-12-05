@@ -18,6 +18,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"image"
 	"io"
 	"log"
@@ -181,11 +182,18 @@ func main() {
 	RADIOSPIRAL_STREAM := "https://radiospiral.radio/stream.mp3"
 	RADIOSPIRAL_JSON_ENDPOINT := "https://radiospiral.net/wp-json/radio/broadcast"
 
-	logFile, err := os.OpenFile("radiospiral.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	check(err)
-	defer logFile.Close()
+	// Command line arguments parsing
+	loggingToFilePtr := flag.Bool("log", false, "Create a log file")
 
-	log.SetOutput(logFile)
+	flag.Parse()
+
+	if *loggingToFilePtr {
+		logFile, err := os.OpenFile("radiospiral.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+		check(err)
+		defer logFile.Close()
+		log.SetOutput(logFile)
+	}
+
 	log.Println("Starting the app")
 
 	// Create the status channel, to read from MPlayer and the pipe to send commands to it
@@ -211,8 +219,9 @@ func main() {
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
 
 	// Header section
-	radioSpiralImage := canvas.NewImageFromResource(resourceHeaderPng)
-	header := container.NewCenter(radioSpiralImage)
+	radioSpiralHeaderImage := canvas.NewImageFromResource(resourceHeaderPng)
+	radioSpiralHeaderImage.SetMinSize(fyne.NewSize(400, 120))
+	radioSpiralHeaderImage.FillMode = canvas.ImageFillContain
 
 	// Next show section
 	showAvatar := canvas.NewImageFromImage(radioSpiralAvatar)
@@ -220,7 +229,6 @@ func main() {
 	showCard := widget.NewCard("RadioSpiral", "", showAvatar)
 	centerCardContainer := container.NewCenter(showCard)
 
-	radioSpiralImage.SetMinSize(fyne.NewSize(400, 120))
 	nowPlayingLabelHeader := widget.NewLabel("Now playing:")
 	nowPlayingLabel := widget.NewLabel("")
 	var playButton *widget.Button
@@ -258,9 +266,12 @@ func main() {
 					playButton.SetIcon(theme.MediaPlayIcon())
 					defer mplayer.Close()
 				} else {
+					// Log, if enabled, the output of MPlayer
+					if *loggingToFilePtr {
+						log.Print("[mplayer] " + data)
+					}
 					// Check if there's an updated title and reflect it on the
 					// GUI
-					log.Print("[mplayer] " + data)
 					if strings.Contains(data, "StreamTitle: ") {
 						log.Println("Found new stream title, updating GUI")
 						newTitleParts := strings.Split(data, "StreamTitle: ")
@@ -293,7 +304,8 @@ func main() {
 
 	// Layout the whole thing
 	window.SetContent(container.NewVBox(
-		header,
+		radioSpiralHeaderImage,
+		layout.NewSpacer(),
 		widget.NewLabel("Next show:"),
 		centerCardContainer,
 		layout.NewSpacer(),
