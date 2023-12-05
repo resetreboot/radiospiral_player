@@ -15,10 +15,11 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"image"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ import (
 // helper
 func check(err error) {
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 }
 
@@ -104,9 +105,9 @@ func (player *MPlayer) Play(stream_url string) {
 		is_playlist := strings.HasSuffix(stream_url, ".m3u") || strings.HasSuffix(stream_url, ".pls")
 		if is_playlist {
 			// player.command = exec.Command(player.player_name, "-quiet", "-playlist", stream_url)
-			player.command = exec.Command(player.player_name, "-playlist", stream_url)
+			player.command = exec.Command(player.player_name, "-v", "-playlist", stream_url)
 		} else {
-			player.command = exec.Command(player.player_name, stream_url)
+			player.command = exec.Command(player.player_name, "-v", stream_url)
 		}
 		player.in, err = player.command.StdinPipe()
 		check(err)
@@ -174,31 +175,24 @@ func loadImageURL(url string) image.Image {
 }
 
 func main() {
+	RADIOSPIRAL_STREAM := "https://radiospiral.radio/stream.mp3"
 	RADIOSPIRAL_JSON_ENDPOINT := "https://radiospiral.net/wp-json/radio/broadcast"
 
+	logFile, err := os.OpenFile("radiospiral.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	check(err)
+	defer logFile.Close()
+
+	log.SetOutput(logFile)
+	log.Println("Starting the app")
+
 	// Create the status channel, to read from MPlayer and the pipe to send commands to it
-	status_chan := make(chan string)
 	pipe_chan := make(chan io.ReadCloser)
 
 	// Create our MPlayer instance
 	mplayer := MPlayer{player_name: "mplayer", is_playing: false, pipe_chan: pipe_chan}
 
-	// Process the output of Mplayer here
-	go func() {
-		for {
-			out_pipe := <-pipe_chan
-			reader := bufio.NewReader(out_pipe)
-			for {
-				data, err := reader.ReadString('\n')
-				if err != nil {
-					status_chan <- "Playing stopped"
-					break
-				} else {
-					status_chan <- data
-				}
-			}
-		}
-	}()
+	// Make sure that MPlayer closes when the program ends
+	defer mplayer.Close()
 
 	// Create our app and window
 	app := app.New()
@@ -209,23 +203,77 @@ func main() {
 	// Keep the status of the player
 	playStatus := false
 
+	// Placeholder avatar
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
-	radioSpiralImage := canvas.NewImageFromImage(radioSpiralAvatar)
-	radioSpiralImage.SetMinSize(fyne.NewSize(64, 64))
-	radiospiralLabel := widget.NewLabel("RadioSpiral")
+
+	// Header section
+	radioSpiralImage := canvas.NewImageFromFile("./res/header.png")
+	header := container.NewCenter(radioSpiralImage)
+
+	// Next show section
+	showAvatar := canvas.NewImageFromImage(radioSpiralAvatar)
+	showAvatar.SetMinSize(fyne.NewSize(200, 200))
+	showCard := widget.NewCard("RadioSpiral", "", showAvatar)
+	centerCardContainer := container.NewCenter(showCard)
+
+	radioSpiralImage.SetMinSize(fyne.NewSize(400, 120))
+	nowPlayingLabelHeader := widget.NewLabel("Now playing:")
 	nowPlayingLabel := widget.NewLabel("")
-
-	radiospiralLabel.Alignment = fyne.TextAlignCenter
-	nowPlayingLabel.Alignment = fyne.TextAlignCenter
-
 	var playButton *widget.Button
+	volumeDown := widget.NewButtonWithIcon("", theme.VolumeDownIcon(), func() {
+		mplayer.DecVolume()
+	})
+	volumeUp := widget.NewButtonWithIcon("", theme.VolumeUpIcon(), func() {
+		mplayer.IncVolume()
+	})
+	controlContainer := container.NewHBox(
+		nowPlayingLabelHeader,
+		layout.NewSpacer(),
+		volumeDown,
+		volumeUp,
+	)
+
+	nowPlayingLabel.Alignment = fyne.TextAlignCenter
+	nowPlayingLabel.Wrapping = fyne.TextWrapWord
+
+	// Process the output of Mplayer here in a separate goroutine
+	go func() {
+		for {
+			out_pipe := <-pipe_chan
+			reader := bufio.NewReader(out_pipe)
+			for {
+				data, err := reader.ReadString('\n')
+				if err != nil {
+					log.Fatal(err)
+					log.Println("Reloading player")
+					mplayer.Close()
+					pipe_chan = make(chan io.ReadCloser)
+					mplayer = MPlayer{player_name: "mplayer", is_playing: false, pipe_chan: pipe_chan}
+					mplayer.Play(RADIOSPIRAL_STREAM)
+					playStatus = true
+					playButton.SetIcon(theme.MediaPlayIcon())
+					defer mplayer.Close()
+				} else {
+					// Check if there's an updated title and reflect it on the
+					// GUI
+					log.Print("[mplayer] " + data)
+					if strings.Contains(data, "StreamTitle: ") {
+						log.Println("Found new stream title, updating GUI")
+						newTitleParts := strings.Split(data, "StreamTitle: ")
+						nowPlayingLabel.SetText(newTitleParts[1])
+					}
+				}
+			}
+		}
+	}()
+
 	playButton = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
 		// Here we control each time the button is pressed and update its
 		// appearance anytime it is clicked. We make the player start playing
 		// or pause.
 		if !mplayer.is_playing {
 			playButton.SetIcon(theme.MediaPlayIcon())
-			mplayer.Play("https://radiospiral.radio/stream.mp3")
+			mplayer.Play(RADIOSPIRAL_STREAM)
 			playStatus = true
 		} else {
 			if playStatus {
@@ -239,27 +287,13 @@ func main() {
 		}
 	})
 
-	// Header section
-	headerElems := container.NewHBox(radioSpiralImage, radiospiralLabel)
-	header := container.NewCenter(headerElems)
-
-	// Next show section
-	showAvatar := canvas.NewImageFromImage(radioSpiralAvatar)
-	showAvatar.SetMinSize(fyne.NewSize(200, 200))
-	showNameLabel := widget.NewLabel("")
-	showDate := widget.NewLabel("")
-	showTimes := widget.NewLabel("")
-	showHost := widget.NewLabel("")
-	showInfo := container.NewVBox(showNameLabel, showDate, showTimes, showHost)
-
-	showSection := container.NewHBox(showAvatar, showInfo)
-
 	// Layout the whole thing
 	window.SetContent(container.NewVBox(
 		header,
 		widget.NewLabel("Next show:"),
-		showSection,
+		centerCardContainer,
 		layout.NewSpacer(),
+		controlContainer,
 		nowPlayingLabel,
 		playButton,
 	))
@@ -269,32 +303,37 @@ func main() {
 	// and the shows data, update the GUI accordingly
 	go func() {
 		for {
-			fmt.Println("Retrieving broadcast data")
 			resp, err := http.Get(RADIOSPIRAL_JSON_ENDPOINT)
-			check(err)
+			if err != nil {
+				// If we get an error fetching the data, await a minute and retry
+				log.Println("[ERROR] Error when querying broadcast endpoint")
+				log.Println(err)
+				time.Sleep(1 * time.Minute)
+				continue
+			}
 
 			body, err := io.ReadAll(resp.Body)
-			check(err)
+			if err != nil {
+				// We couldn't read the body, log the error, await a minute and retry
+				log.Println("[ERROR] Error when reading the body")
+				log.Println(err)
+				time.Sleep(1 * time.Minute)
+				continue
+			}
 
 			var broadcastResponse BroadcastResponse
+
 			json.Unmarshal(body, &broadcastResponse)
-			nowPlayingLabel.SetText("Now playing: " + broadcastResponse.Broadcast.NowPlaying.Text)
-			showNameLabel.SetText(broadcastResponse.Broadcast.NextShow.Show.Name)
+			showCard.SetTitle(broadcastResponse.Broadcast.NextShow.Show.Name)
 			date := broadcastResponse.Broadcast.NextShow.Day + " " + broadcastResponse.Broadcast.NextShow.Date
-			times := broadcastResponse.Broadcast.NextShow.Start + " to " + broadcastResponse.Broadcast.NextShow.End
-			showDate.SetText(date)
-			showTimes.SetText(times)
-			showHost.SetText("by: " + broadcastResponse.Broadcast.NextShow.Show.Hosts[0].Name)
-			fmt.Println(broadcastResponse.Broadcast.NextShow.Show.AvatarUrl)
+			host := "by: " + broadcastResponse.Broadcast.NextShow.Show.Hosts[0].Name
+			showCard.SetSubTitle(date + " " + host)
 			showAvatar.Image = loadImageURL(broadcastResponse.Broadcast.NextShow.Show.AvatarUrl)
 			showAvatar.Refresh()
-			time.Sleep(60 * time.Second)
+			time.Sleep(10 * time.Minute)
 		}
 	}()
 
 	// Showtime!
 	window.ShowAndRun()
-
-	// Window has been closed, make sure that MPlayer closes too
-	mplayer.Close()
 }
