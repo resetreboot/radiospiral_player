@@ -16,6 +16,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"image"
 	"io"
 	"net/http"
 	"os/exec"
@@ -24,6 +25,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
@@ -159,6 +161,18 @@ func (player *MPlayer) DecVolume() {
 	}
 }
 
+// Load images from URLs
+func loadImageURL(url string) image.Image {
+	parts := strings.Split(url, "?")
+	resp, err := http.Get(parts[0])
+	check(err)
+
+	defer resp.Body.Close()
+	img, _, err := image.Decode(resp.Body)
+	check(err)
+	return img
+}
+
 func main() {
 	RADIOSPIRAL_JSON_ENDPOINT := "https://radiospiral.net/wp-json/radio/broadcast"
 
@@ -193,46 +207,61 @@ func main() {
 	window.Resize(fyne.NewSize(400, 600))
 
 	// Keep the status of the player
-	play_status := false
+	playStatus := false
 
-	radiospiral_label := widget.NewLabel("RadioSpiral")
-	nowplaying_label := widget.NewLabel("")
+	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
+	radioSpiralImage := canvas.NewImageFromImage(radioSpiralAvatar)
+	radioSpiralImage.SetMinSize(fyne.NewSize(64, 64))
+	radiospiralLabel := widget.NewLabel("RadioSpiral")
+	nowPlayingLabel := widget.NewLabel("")
 
-	radiospiral_label.Alignment = fyne.TextAlignCenter
-	nowplaying_label.Alignment = fyne.TextAlignCenter
+	radiospiralLabel.Alignment = fyne.TextAlignCenter
+	nowPlayingLabel.Alignment = fyne.TextAlignCenter
 
-	var play_button *widget.Button
-	play_button = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
+	var playButton *widget.Button
+	playButton = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
 		// Here we control each time the button is pressed and update its
 		// appearance anytime it is clicked. We make the player start playing
 		// or pause.
 		if !mplayer.is_playing {
-			play_button.SetIcon(theme.MediaPlayIcon())
+			playButton.SetIcon(theme.MediaPlayIcon())
 			mplayer.Play("https://radiospiral.radio/stream.mp3")
-			play_status = true
+			playStatus = true
 		} else {
-			if play_status {
-				play_status = false
-				play_button.SetIcon(theme.MediaPauseIcon())
+			if playStatus {
+				playStatus = false
+				playButton.SetIcon(theme.MediaPauseIcon())
 			} else {
-				play_status = true
-				play_button.SetIcon(theme.MediaPlayIcon())
+				playStatus = true
+				playButton.SetIcon(theme.MediaPlayIcon())
 			}
 			mplayer.Pause()
 		}
 	})
 
-	// TODO: Check how can we make this area RadioSpiral blue
-	// TODO: Add RadioSpiral icon
-	// TODO: Add RadioSpiral's font
-	header := container.NewCenter(radiospiral_label)
+	// Header section
+	headerElems := container.NewHBox(radioSpiralImage, radiospiralLabel)
+	header := container.NewCenter(headerElems)
+
+	// Next show section
+	showAvatar := canvas.NewImageFromImage(radioSpiralAvatar)
+	showAvatar.SetMinSize(fyne.NewSize(200, 200))
+	showNameLabel := widget.NewLabel("")
+	showDate := widget.NewLabel("")
+	showTimes := widget.NewLabel("")
+	showHost := widget.NewLabel("")
+	showInfo := container.NewVBox(showNameLabel, showDate, showTimes, showHost)
+
+	showSection := container.NewHBox(showAvatar, showInfo)
 
 	// Layout the whole thing
 	window.SetContent(container.NewVBox(
 		header,
+		widget.NewLabel("Next show:"),
+		showSection,
 		layout.NewSpacer(),
-		nowplaying_label,
-		play_button,
+		nowPlayingLabel,
+		playButton,
 	))
 
 	// Now that everything is laid out, we can start this
@@ -249,7 +278,16 @@ func main() {
 
 			var broadcastResponse BroadcastResponse
 			json.Unmarshal(body, &broadcastResponse)
-			nowplaying_label.SetText("Now playing: " + broadcastResponse.Broadcast.NowPlaying.Text)
+			nowPlayingLabel.SetText("Now playing: " + broadcastResponse.Broadcast.NowPlaying.Text)
+			showNameLabel.SetText(broadcastResponse.Broadcast.NextShow.Show.Name)
+			date := broadcastResponse.Broadcast.NextShow.Day + " " + broadcastResponse.Broadcast.NextShow.Date
+			times := broadcastResponse.Broadcast.NextShow.Start + " to " + broadcastResponse.Broadcast.NextShow.End
+			showDate.SetText(date)
+			showTimes.SetText(times)
+			showHost.SetText("by: " + broadcastResponse.Broadcast.NextShow.Show.Hosts[0].Name)
+			fmt.Println(broadcastResponse.Broadcast.NextShow.Show.AvatarUrl)
+			showAvatar.Image = loadImageURL(broadcastResponse.Broadcast.NextShow.Show.AvatarUrl)
+			showAvatar.Refresh()
 			time.Sleep(60 * time.Second)
 		}
 	}()
