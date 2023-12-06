@@ -11,6 +11,10 @@
 
     Added mute button to the GUI
 
+    Added link to RadioSpiral
+
+    Added support for ffmpeg in Windows (preliminary)
+
     
 05/12/2023 José Carlos Cuevas <reset.reboot@posteo.net>
 
