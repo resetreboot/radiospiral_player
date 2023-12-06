@@ -43,6 +43,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -333,6 +334,7 @@ func main() {
 	showCard := widget.NewCard("RadioSpiral", "", showAvatar)
 	centerCardContainer := container.NewCenter(showCard)
 
+	// Player section
 	nowPlayingLabelHeader := widget.NewLabel("Now playing:")
 	nowPlayingLabel := widget.NewLabel("")
 	var playButton *widget.Button
@@ -412,9 +414,16 @@ func main() {
 		}
 	})
 
+	rsUrl, err := url.Parse("https://radiospiral.net")
+
+	if err != nil {
+		log.Println("Error generating RadioSpiral url")
+	}
+
 	// Layout the whole thing
 	window.SetContent(container.NewVBox(
 		radioSpiralHeaderImage,
+		container.NewCenter(widget.NewHyperlink("https://radiospiral.net", rsUrl)),
 		layout.NewSpacer(),
 		widget.NewLabel("Next show:"),
 		centerCardContainer,
