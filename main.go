@@ -46,6 +46,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -283,9 +284,14 @@ func loadImageURL(url string) image.Image {
 }
 
 func main() {
-	RADIOSPIRAL_STREAM := "https://radiospiral.radio/stream.mp3"
-	RADIOSPIRAL_JSON_ENDPOINT := "https://radiospiral.net/wp-json/radio/broadcast"
+	const RADIOSPIRAL_STREAM = "https://radiospiral.radio/stream.mp3"
+	const RADIOSPIRAL_JSON_ENDPOINT = "https://radiospiral.net/wp-json/radio/broadcast"
 	PLAYER_CMD := "ffmpeg"
+
+	if runtime.GOOS == "windows" {
+		log.Println("Detected Windows")
+		PLAYER_CMD = "ffmpeg.exe"
+	}
 
 	// Command line arguments parsing
 	loggingToFilePtr := flag.Bool("log", false, "Create a log file")
