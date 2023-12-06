@@ -1,3 +1,17 @@
+06/12/2023 José Carlos Cuevas <reset.reboot@posteo.net>
+
+    Ditched mplayer as the stream decoding + audio play, it is ancient and abandoned
+
+    Now using ffmpeg as the stream decoding backend
+
+    Now we use the oto player library to control the playback and get the raw WAV
+        stream to the OS audio system
+
+    Fixed the GUI for the play button
+
+    Added mute button to the GUI
+
+    
 05/12/2023 José Carlos Cuevas <reset.reboot@posteo.net>
 
     Version 1.0 ready for production
