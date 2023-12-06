@@ -341,11 +341,15 @@ func main() {
 	volumeUp := widget.NewButtonWithIcon("", theme.VolumeUpIcon(), func() {
 		streamPlayer.IncVolume()
 	})
+	volumeMute := widget.NewButtonWithIcon("", theme.VolumeMuteIcon(), func() {
+		streamPlayer.Mute()
+	})
 	controlContainer := container.NewHBox(
 		nowPlayingLabelHeader,
 		layout.NewSpacer(),
 		volumeDown,
 		volumeUp,
+		volumeMute,
 	)
 
 	nowPlayingLabel.Alignment = fyne.TextAlignCenter
