@@ -21,14 +21,17 @@
 package main
 
 /*
- * This app is basically a frontend using MPlayer to stream, so we don't have to deal with
+ * This app is basically using ffmpeg to read the stream, so we don't have to deal with
  * complicated streaming stuff when there's usually a perfectly working program that will
  * do this better than we can ever do.
  *
- * We keep control of MPlayer through the MPlayer object and pipes to send it commands to
- * play, stop and which is the URL we want to stream (usually, RadioSpiral's).
+ * We use the Oto library (multiplatform!) to send the raw WAV data from ffmpeg to the audio
+ * system of the OS
  *
- * There is also a goroutine that checks the broadcast information every minute, updates
+ * We keep control of oto and ffmpeg through the StreamPlayer object. We use pipe of stderr
+ * to read the text output of ffmpeg and watch for stream title changes, indside a goroutine
+ *
+ * There is also a goroutine that checks the broadcast information every ten minutes, updates
  * the GUI with the currently playing information and also the next show coming up.
  */
 
@@ -44,6 +47,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/ebitengine/oto/v3"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -101,7 +106,9 @@ type HostsData struct {
 
 // Radio player interface
 type RadioPlayer interface {
-	Play(stream_url string)
+	Load(stream_url string)
+	IsPlaying() bool
+	Play()
 	Mute()
 	Pause()
 	IncVolume()
@@ -109,77 +116,155 @@ type RadioPlayer interface {
 	Close()
 }
 
-// MPlayer
-type MPlayer struct {
-	player_name string
-	is_playing  bool
-	stream_url  string
-	command     *exec.Cmd
-	in          io.WriteCloser
-	out         io.ReadCloser
-	pipe_chan   chan io.ReadCloser
+// StreamPlayer
+type StreamPlayer struct {
+	player_name   string
+	stream_url    string
+	command       *exec.Cmd
+	in            io.WriteCloser
+	out           io.ReadCloser
+	audio         io.ReadCloser
+	pipe_chan     chan io.ReadCloser
+	otoContext    *oto.Context
+	otoPlayer     *oto.Player
+	currentVolume float64
+	paused        bool
 }
 
-func (player *MPlayer) Play(stream_url string) {
-	if !player.is_playing {
+func (player *StreamPlayer) IsPlaying() bool {
+	if player.otoPlayer == nil {
+		log.Println("Player not loaded!")
+		return false
+	}
+
+	return player.otoPlayer.IsPlaying()
+}
+
+func (player *StreamPlayer) Load(stream_url string) {
+	if (player.otoPlayer == nil) || (!player.otoPlayer.IsPlaying()) {
 		var err error
 		is_playlist := strings.HasSuffix(stream_url, ".m3u") || strings.HasSuffix(stream_url, ".pls")
 		if is_playlist {
+			// TODO: Check ffmpeg's ability to deal with playlists
 			// player.command = exec.Command(player.player_name, "-quiet", "-playlist", stream_url)
-			player.command = exec.Command(player.player_name, "-v", "-playlist", stream_url)
+			player.command = exec.Command(player.player_name, "-nodisp", "-loglevel", "verbose", "-playlist", stream_url)
 		} else {
-			player.command = exec.Command(player.player_name, "-v", stream_url)
+			player.command = exec.Command(player.player_name, "-loglevel", "verbose", "-i", stream_url, "-f", "wav", "-")
 		}
+
+		// In to send things over stdin to ffmpeg
 		player.in, err = player.command.StdinPipe()
 		check(err)
-		player.out, err = player.command.StdoutPipe()
+		// Out will be the wave data we will read and play
+		player.audio, err = player.command.StdoutPipe()
+		check(err)
+		// Err is the output of ffmpeg, used to get stream title
+		player.out, err = player.command.StderrPipe()
 		check(err)
 
+		log.Println("Starting ffmpeg")
 		err = player.command.Start()
 		check(err)
 
-		player.is_playing = true
 		player.stream_url = stream_url
+
+		op := &oto.NewContextOptions{
+			SampleRate:   44100,
+			ChannelCount: 2,
+			Format:       oto.FormatSignedInt16LE,
+		}
+
+		if player.otoContext == nil {
+			otoContext, readyChan, err := oto.NewContext(op)
+			player.otoContext = otoContext
+			if err != nil {
+				log.Fatal(err)
+			}
+			<-readyChan
+		}
+
+		player.otoPlayer = player.otoContext.NewPlayer(player.audio)
+		// Save current volume for the mute function
+		player.currentVolume = player.otoPlayer.Volume()
+
+		player.paused = false
+
 		go func() {
 			player.pipe_chan <- player.out
 		}()
 	}
 }
 
-func (player *MPlayer) Close() {
-	if player.is_playing {
-		player.is_playing = false
+func (player *StreamPlayer) Play() {
+	if player.otoPlayer == nil {
+		log.Println("Stream not loaded")
+		return
+	}
 
-		player.in.Write([]byte("q"))
+	if !player.otoPlayer.IsPlaying() {
+		if player.command == nil {
+			player.Load(player.stream_url)
+		}
+		player.otoPlayer.Play()
+	}
+}
+
+func (player *StreamPlayer) Close() {
+	if player.IsPlaying() {
+		err := player.otoPlayer.Close()
+		if err != nil {
+			log.Println(err)
+		}
 		player.in.Close()
 		player.out.Close()
-		player.command = nil
+		player.audio.Close()
+		// player.command.Cancel()
 
 		player.stream_url = ""
 	}
 }
 
-func (player *MPlayer) Mute() {
-	if player.is_playing {
-		player.in.Write([]byte("m"))
+func (player *StreamPlayer) Mute() {
+	if player.IsPlaying() {
+		if player.otoPlayer.Volume() > 0 {
+			player.currentVolume = player.otoPlayer.Volume()
+		} else {
+			player.otoPlayer.SetVolume(player.currentVolume)
+		}
 	}
 }
 
-func (player *MPlayer) Pause() {
-	if player.is_playing {
-		player.in.Write([]byte("p"))
+func (player *StreamPlayer) Pause() {
+	if player.IsPlaying() {
+		if !player.paused {
+			log.Println("[oto] Pausing")
+			player.paused = true
+			player.otoPlayer.Pause()
+		} else {
+			log.Println("[oto] Playing")
+			player.paused = false
+			player.otoPlayer.Play()
+		}
 	}
 }
 
-func (player *MPlayer) IncVolume() {
-	if player.is_playing {
-		player.in.Write([]byte("*"))
+func (player *StreamPlayer) IncVolume() {
+	if player.IsPlaying() {
+		player.currentVolume += 0.05
+		if player.currentVolume >= 1.0 {
+			player.currentVolume = 1.0
+		}
+		player.otoPlayer.SetVolume(player.currentVolume)
 	}
 }
 
-func (player *MPlayer) DecVolume() {
-	if player.is_playing {
-		player.in.Write([]byte("/"))
+func (player *StreamPlayer) DecVolume() {
+	if player.IsPlaying() {
+		player.currentVolume -= 0.05
+		if player.currentVolume <= 0.0 {
+			player.currentVolume = 0.0
+		}
+		player.otoPlayer.SetVolume(player.currentVolume)
 	}
 }
 
@@ -198,6 +283,7 @@ func loadImageURL(url string) image.Image {
 func main() {
 	RADIOSPIRAL_STREAM := "https://radiospiral.radio/stream.mp3"
 	RADIOSPIRAL_JSON_ENDPOINT := "https://radiospiral.net/wp-json/radio/broadcast"
+	PLAYER_CMD := "ffmpeg"
 
 	// Command line arguments parsing
 	loggingToFilePtr := flag.Bool("log", false, "Create a log file")
@@ -213,14 +299,14 @@ func main() {
 
 	log.Println("Starting the app")
 
-	// Create the status channel, to read from MPlayer and the pipe to send commands to it
+	// Create the status channel, to read from StreamPlayer and the pipe to send commands to it
 	pipe_chan := make(chan io.ReadCloser)
 
-	// Create our MPlayer instance
-	mplayer := MPlayer{player_name: "mplayer", is_playing: false, pipe_chan: pipe_chan}
+	// Create our StreamPlayer instance
+	streamPlayer := StreamPlayer{player_name: PLAYER_CMD, pipe_chan: pipe_chan}
 
-	// Make sure that MPlayer closes when the program ends
-	defer mplayer.Close()
+	// Make sure that StreamPlayer closes when the program ends
+	defer streamPlayer.Close()
 
 	// Create our app and window
 	app := app.New()
@@ -250,10 +336,10 @@ func main() {
 	nowPlayingLabel := widget.NewLabel("")
 	var playButton *widget.Button
 	volumeDown := widget.NewButtonWithIcon("", theme.VolumeDownIcon(), func() {
-		mplayer.DecVolume()
+		streamPlayer.DecVolume()
 	})
 	volumeUp := widget.NewButtonWithIcon("", theme.VolumeUpIcon(), func() {
-		mplayer.IncVolume()
+		streamPlayer.IncVolume()
 	})
 	controlContainer := container.NewHBox(
 		nowPlayingLabelHeader,
@@ -275,17 +361,18 @@ func main() {
 				if err != nil {
 					log.Fatal(err)
 					log.Println("Reloading player")
-					mplayer.Close()
+					streamPlayer.Close()
 					pipe_chan = make(chan io.ReadCloser)
-					mplayer = MPlayer{player_name: "mplayer", is_playing: false, pipe_chan: pipe_chan}
-					mplayer.Play(RADIOSPIRAL_STREAM)
+					streamPlayer = StreamPlayer{player_name: PLAYER_CMD, pipe_chan: pipe_chan}
+					streamPlayer.Load(RADIOSPIRAL_STREAM)
+					streamPlayer.Play()
 					playStatus = true
 					playButton.SetIcon(theme.MediaPlayIcon())
-					defer mplayer.Close()
+					defer streamPlayer.Close()
 				} else {
-					// Log, if enabled, the output of MPlayer
+					// Log, if enabled, the output of StreamPlayer
 					if *loggingToFilePtr {
-						log.Print("[mplayer] " + data)
+						log.Print("[" + streamPlayer.player_name + "] " + data)
 					}
 					// Check if there's an updated title and reflect it on the
 					// GUI
@@ -303,9 +390,10 @@ func main() {
 		// Here we control each time the button is pressed and update its
 		// appearance anytime it is clicked. We make the player start playing
 		// or pause.
-		if !mplayer.is_playing {
+		if !streamPlayer.IsPlaying() {
 			playButton.SetIcon(theme.MediaPlayIcon())
-			mplayer.Play(RADIOSPIRAL_STREAM)
+			streamPlayer.Load(RADIOSPIRAL_STREAM)
+			streamPlayer.Play()
 			playStatus = true
 		} else {
 			if playStatus {
@@ -315,7 +403,7 @@ func main() {
 				playStatus = true
 				playButton.SetIcon(theme.MediaPlayIcon())
 			}
-			mplayer.Pause()
+			streamPlayer.Pause()
 		}
 	})
 
