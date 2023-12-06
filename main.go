@@ -228,6 +228,7 @@ func (player *StreamPlayer) Mute() {
 	if player.IsPlaying() {
 		if player.otoPlayer.Volume() > 0 {
 			player.currentVolume = player.otoPlayer.Volume()
+			player.otoPlayer.SetVolume(0.0)
 		} else {
 			player.otoPlayer.SetVolume(player.currentVolume)
 		}
