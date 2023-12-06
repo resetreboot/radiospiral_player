@@ -390,22 +390,22 @@ func main() {
 		}
 	}()
 
-	playButton = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
+	playButton = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
 		// Here we control each time the button is pressed and update its
 		// appearance anytime it is clicked. We make the player start playing
 		// or pause.
 		if !streamPlayer.IsPlaying() {
-			playButton.SetIcon(theme.MediaPlayIcon())
+			playButton.SetIcon(theme.MediaPauseIcon())
 			streamPlayer.Load(RADIOSPIRAL_STREAM)
 			streamPlayer.Play()
 			playStatus = true
 		} else {
 			if playStatus {
 				playStatus = false
-				playButton.SetIcon(theme.MediaPauseIcon())
+				playButton.SetIcon(theme.MediaPlayIcon())
 			} else {
 				playStatus = true
-				playButton.SetIcon(theme.MediaPlayIcon())
+				playButton.SetIcon(theme.MediaPauseIcon())
 			}
 			streamPlayer.Pause()
 		}
