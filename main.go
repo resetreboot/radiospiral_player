@@ -45,6 +45,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -297,7 +298,12 @@ func main() {
 
 	if runtime.GOOS == "windows" {
 		log.Println("Detected Windows")
-		PLAYER_CMD = "ffmpeg.exe"
+		ex, err := os.Executable()
+		if err != nil {
+			log.Fatal("Couldn't get executable path")
+		}
+		exPath := filepath.Dir(ex)
+		PLAYER_CMD = filepath.Join(exPath, "ffmpeg.exe")
 	}
 
 	// Command line arguments parsing
