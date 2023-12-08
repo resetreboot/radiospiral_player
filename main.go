@@ -36,7 +36,6 @@ package main
  */
 
 import (
-	"bufio"
 	"encoding/json"
 	"flag"
 	"image"
@@ -51,6 +50,7 @@ import (
 	"time"
 
 	"github.com/ebitengine/oto/v3"
+	"github.com/muesli/cancelreader"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -60,6 +60,21 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
+
+// Enums and constants
+const RADIOSPIRAL_STREAM = "https://radiospiral.radio/stream.mp3"
+const RADIOSPIRAL_JSON_ENDPOINT = "https://radiospiral.net/wp-json/radio/broadcast"
+
+const (
+	Loading int = iota
+	Playing
+	Paused
+	Stopped
+)
+
+// Cancel Reader
+
+var reader cancelreader.CancelReader
 
 // helper
 func check(err error) {
@@ -220,7 +235,6 @@ func (player *StreamPlayer) Close() {
 		player.in.Close()
 		player.out.Close()
 		player.audio.Close()
-		// player.command.Cancel()
 
 		player.stream_url = ""
 	}
@@ -240,13 +254,8 @@ func (player *StreamPlayer) Mute() {
 func (player *StreamPlayer) Pause() {
 	if player.IsPlaying() {
 		if !player.paused {
-			log.Println("[oto] Pausing")
 			player.paused = true
 			player.otoPlayer.Pause()
-		} else {
-			log.Println("[oto] Playing")
-			player.paused = false
-			player.otoPlayer.Play()
 		}
 	}
 }
@@ -284,8 +293,6 @@ func loadImageURL(url string) image.Image {
 }
 
 func main() {
-	const RADIOSPIRAL_STREAM = "https://radiospiral.radio/stream.mp3"
-	const RADIOSPIRAL_JSON_ENDPOINT = "https://radiospiral.net/wp-json/radio/broadcast"
 	PLAYER_CMD := "ffmpeg"
 
 	if runtime.GOOS == "windows" {
@@ -313,9 +320,6 @@ func main() {
 	// Create our StreamPlayer instance
 	streamPlayer := StreamPlayer{player_name: PLAYER_CMD, pipe_chan: pipe_chan}
 
-	// Make sure that StreamPlayer closes when the program ends
-	defer streamPlayer.Close()
-
 	// Create our app and window
 	app := app.New()
 	window := app.NewWindow("RadioSpiral Player")
@@ -324,7 +328,7 @@ func main() {
 	window.SetIcon(resourceIconPng)
 
 	// Keep the status of the player
-	playStatus := false
+	playStatus := Stopped
 
 	// Placeholder avatar
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
@@ -343,7 +347,6 @@ func main() {
 	// Player section
 	nowPlayingLabelHeader := widget.NewLabel("Now playing:")
 	nowPlayingLabel := widget.NewLabel("")
-	var playButton *widget.Button
 	volumeDown := widget.NewButtonWithIcon("", theme.VolumeDownIcon(), func() {
 		streamPlayer.DecVolume()
 	})
@@ -364,61 +367,71 @@ func main() {
 	nowPlayingLabel.Alignment = fyne.TextAlignCenter
 	nowPlayingLabel.Wrapping = fyne.TextWrapWord
 
-	// Process the output of Mplayer here in a separate goroutine
+	var playButton *widget.Button
+
+	playButton = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
+		// Here we control each time the button is pressed and update its
+		// appearance anytime it is clicked. We make the player start playing
+		// or pause.
+		if !streamPlayer.IsPlaying() && !streamPlayer.paused {
+			playButton.SetIcon(theme.MediaPauseIcon())
+			playButton.SetText("(Buffering)")
+			streamPlayer.Load(RADIOSPIRAL_STREAM)
+			streamPlayer.Play()
+			playStatus = Loading
+		} else {
+			if playStatus == Playing {
+				playStatus = Paused
+				playButton.SetIcon(theme.MediaPlayIcon())
+				streamPlayer.Pause()
+			} else {
+				reader.Cancel()
+				playStatus = Loading
+				playButton.SetText("(Buffering)")
+				playButton.SetIcon(theme.MediaPauseIcon())
+				streamPlayer.Load(RADIOSPIRAL_STREAM)
+				streamPlayer.Play()
+			}
+		}
+	})
+
+	// Process the output of ffmpeg here in a separate goroutine
 	go func() {
 		for {
 			out_pipe := <-pipe_chan
-			reader := bufio.NewReader(out_pipe)
+			var err error
+			reader, err = cancelreader.NewReader(out_pipe)
+			if err != nil {
+				log.Println("Error opening reader")
+			}
 			for {
-				data, err := reader.ReadString('\n')
+				var data [255]byte
+				_, err := reader.Read(data[:])
 				if err != nil {
-					log.Fatal(err)
-					log.Println("Reloading player")
-					streamPlayer.Close()
-					pipe_chan = make(chan io.ReadCloser)
-					streamPlayer = StreamPlayer{player_name: PLAYER_CMD, pipe_chan: pipe_chan}
-					streamPlayer.Load(RADIOSPIRAL_STREAM)
-					streamPlayer.Play()
-					playStatus = true
-					playButton.SetIcon(theme.MediaPlayIcon())
-					defer streamPlayer.Close()
-				} else {
+					log.Println(err)
+					break
+				}
+				lines := strings.Split(string(data[:]), "\n")
+				for _, line := range lines {
 					// Log, if enabled, the output of StreamPlayer
 					if *loggingToFilePtr {
-						log.Print("[" + streamPlayer.player_name + "] " + data)
+						log.Print("[" + streamPlayer.player_name + "] " + line)
+					}
+					if strings.Contains(line, "Output #0") {
+						playStatus = Playing
+						playButton.SetText("")
 					}
 					// Check if there's an updated title and reflect it on the
 					// GUI
-					if strings.Contains(data, "StreamTitle: ") {
+					if strings.Contains(line, "StreamTitle: ") {
 						log.Println("Found new stream title, updating GUI")
-						newTitleParts := strings.Split(data, "StreamTitle: ")
+						newTitleParts := strings.Split(line, "StreamTitle: ")
 						nowPlayingLabel.SetText(newTitleParts[1])
 					}
 				}
 			}
 		}
 	}()
-
-	playButton = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
-		// Here we control each time the button is pressed and update its
-		// appearance anytime it is clicked. We make the player start playing
-		// or pause.
-		if !streamPlayer.IsPlaying() {
-			playButton.SetIcon(theme.MediaPauseIcon())
-			streamPlayer.Load(RADIOSPIRAL_STREAM)
-			streamPlayer.Play()
-			playStatus = true
-		} else {
-			if playStatus {
-				playStatus = false
-				playButton.SetIcon(theme.MediaPlayIcon())
-			} else {
-				playStatus = true
-				playButton.SetIcon(theme.MediaPauseIcon())
-			}
-			streamPlayer.Pause()
-		}
-	})
 
 	rsUrl, err := url.Parse("https://radiospiral.net")
 
@@ -477,4 +490,5 @@ func main() {
 
 	// Showtime!
 	window.ShowAndRun()
+	streamPlayer.Close()
 }
