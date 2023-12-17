@@ -38,7 +38,7 @@ type RadioPlayer interface {
 	IsPlaying() bool
 	Play()
 	Mute()
-	Pause()
+	Stop()
 	IncVolume()
 	DecVolume()
 	Close()
@@ -52,11 +52,9 @@ type StreamPlayer struct {
 	in            io.WriteCloser
 	out           io.ReadCloser
 	audio         io.ReadCloser
-	pipe_chan     chan io.ReadCloser
 	otoContext    *oto.Context
 	otoPlayer     *oto.Player
 	currentVolume float64
-	paused        bool
 }
 
 func (player *StreamPlayer) IsPlaying() bool {
@@ -114,12 +112,6 @@ func (player *StreamPlayer) Load(stream_url string) {
 		player.otoPlayer = player.otoContext.NewPlayer(player.audio)
 		// Save current volume for the mute function
 		player.currentVolume = player.otoPlayer.Volume()
-
-		player.paused = false
-
-		go func() {
-			player.pipe_chan <- player.out
-		}()
 	}
 }
 
@@ -146,6 +138,7 @@ func (player *StreamPlayer) Close() {
 		player.in.Close()
 		player.out.Close()
 		player.audio.Close()
+		player.out = nil
 
 		player.stream_url = ""
 	}
@@ -162,12 +155,9 @@ func (player *StreamPlayer) Mute() {
 	}
 }
 
-func (player *StreamPlayer) Pause() {
+func (player *StreamPlayer) Stop() {
 	if player.IsPlaying() {
-		if !player.paused {
-			player.paused = true
-			player.otoPlayer.Pause()
-		}
+		player.Close()
 	}
 }
 

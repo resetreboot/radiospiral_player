@@ -49,8 +49,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muesli/cancelreader"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -69,10 +67,6 @@ const (
 	Playing
 	Stopped
 )
-
-// Cancel Reader
-
-var reader cancelreader.CancelReader
 
 // helper
 func check(err error) {
@@ -159,10 +153,10 @@ func main() {
 	log.Println("Starting the app")
 
 	// Create the status channel, to read from StreamPlayer and the pipe to send commands to it
-	pipe_chan := make(chan io.ReadCloser)
+	// pipe_chan := make(chan io.ReadCloser)
 
 	// Create our StreamPlayer instance
-	streamPlayer := StreamPlayer{player_name: PLAYER_CMD, pipe_chan: pipe_chan}
+	streamPlayer := StreamPlayer{player_name: PLAYER_CMD}
 
 	// Create our app and window
 	app := app.New()
@@ -217,7 +211,7 @@ func main() {
 		// Here we control each time the button is pressed and update its
 		// appearance anytime it is clicked. We make the player start playing
 		// or pause.
-		if !streamPlayer.IsPlaying() && !streamPlayer.paused {
+		if !streamPlayer.IsPlaying() {
 			playButton.SetIcon(theme.MediaStopIcon())
 			playButton.SetText("(Buffering)")
 			streamPlayer.Load(RADIOSPIRAL_STREAM)
@@ -227,9 +221,8 @@ func main() {
 			if playStatus == Playing {
 				playStatus = Stopped
 				playButton.SetIcon(theme.MediaPlayIcon())
-				streamPlayer.Pause()
+				streamPlayer.Stop()
 			} else {
-				reader.Cancel()
 				playStatus = Loading
 				playButton.SetText("(Buffering)")
 				playButton.SetIcon(theme.MediaStopIcon())
@@ -242,37 +235,37 @@ func main() {
 	// Process the output of ffmpeg here in a separate goroutine
 	go func() {
 		for {
-			out_pipe := <-pipe_chan
-			var err error
-			reader, err = cancelreader.NewReader(out_pipe)
-			if err != nil {
-				log.Println("Error opening reader")
-			}
-			for {
-				var data [255]byte
-				_, err := reader.Read(data[:])
-				if err != nil {
-					log.Println(err)
-					break
-				}
-				lines := strings.Split(string(data[:]), "\n")
-				for _, line := range lines {
-					// Log, if enabled, the output of StreamPlayer
-					if *loggingToFilePtr {
-						log.Print("[" + streamPlayer.player_name + "] " + line)
+			if streamPlayer.out != nil {
+				for {
+					var data [255]byte
+					_, err := streamPlayer.out.Read(data[:])
+					if err != nil {
+						log.Println(err)
+						break
 					}
-					if strings.Contains(line, "Output #0") {
-						playStatus = Playing
-						playButton.SetText("")
-					}
-					// Check if there's an updated title and reflect it on the
-					// GUI
-					if strings.Contains(line, "StreamTitle: ") {
-						log.Println("Found new stream title, updating GUI")
-						newTitleParts := strings.Split(line, "StreamTitle: ")
-						nowPlayingLabel.SetText(newTitleParts[1])
+					lines := strings.Split(string(data[:]), "\n")
+					for _, line := range lines {
+						// Log, if enabled, the output of StreamPlayer
+						if *loggingToFilePtr {
+							log.Print("[" + streamPlayer.player_name + "] " + line)
+						}
+						if strings.Contains(line, "Output #0") {
+							playStatus = Playing
+							playButton.SetText("")
+						}
+						// Check if there's an updated title and reflect it on the
+						// GUI
+						if strings.Contains(line, "StreamTitle: ") {
+							log.Println("Found new stream title, updating GUI")
+							newTitleParts := strings.Split(line, "StreamTitle: ")
+							nowPlayingLabel.SetText(newTitleParts[1])
+						}
 					}
 				}
+			} else {
+				// To avoid high CPU usage, we wait some milliseconds before testing
+				// again for the change in streamPlayer.out from nil to ReadCloser
+				time.Sleep(200 * time.Millisecond)
 			}
 		}
 	}()
