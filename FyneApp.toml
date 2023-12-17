@@ -4,5 +4,5 @@ Website = "https://radiospiral.net"
 Icon = "res/icon.png"
 Name = "RadioSpiral Player"
 ID = "net.radiospiral.player"
-Version = "1.2.0"
-Build = 42
+Version = "1.4.0"
+Build = 52
