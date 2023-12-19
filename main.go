@@ -320,7 +320,6 @@ func main() {
 			host := ""
 			if len(broadcastResponse.Broadcast.NextShow.Show.Hosts) > 0 {
 				host = "by: " + broadcastResponse.Broadcast.NextShow.Show.Hosts[0].Name
-			} else {
 			}
 			showCard.SetSubTitle(date + " " + host)
 			showAvatar.Image = loadImageURL(broadcastResponse.Broadcast.NextShow.Show.AvatarUrl)
