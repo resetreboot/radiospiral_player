@@ -1,3 +1,19 @@
+19/12/2023 José Carlos Cuevas <reset.reboot@posteo.net>
+
+    Improved the situation with ffmpeg, no need for cancelreader anymore
+
+    Fixed a bug with no host information
+
+    Changed pause to stop, as it is what we really do
+
+    Killed everything in the stop action
+
+    Refactor stream player code to its own file
+
+    Windows initial support, still very buggy
+
+    Buffering indicator implemented
+   
 06/12/2023 José Carlos Cuevas <reset.reboot@posteo.net>
 
     Ditched mplayer as the stream decoding + audio play, it is ancient and abandoned
