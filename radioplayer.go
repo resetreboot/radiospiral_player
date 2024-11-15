@@ -36,6 +36,7 @@ import (
 type RadioPlayer interface {
 	Load(stream_url string)
 	IsPlaying() bool
+	IsMuted() bool
 	Play()
 	Mute()
 	Stop()
@@ -142,6 +143,10 @@ func (player *StreamPlayer) Close() {
 
 		player.stream_url = ""
 	}
+}
+
+func (player *StreamPlayer) IsMuted() bool {
+	return player.otoPlayer.Volume() == 0.0
 }
 
 func (player *StreamPlayer) Mute() {

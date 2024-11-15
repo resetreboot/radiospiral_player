@@ -59,7 +59,7 @@ import (
 )
 
 // Enums and constants
-const RADIOSPIRAL_STREAM = "https://radiospiral.radio/stream.mp3"
+const RADIOSPIRAL_STREAM = "https://radiospiral.radio:8000/stream.mp3"
 const RADIOSPIRAL_JSON_ENDPOINT = "https://radiospiral.net/wp-json/radio/broadcast"
 
 const (
@@ -191,8 +191,16 @@ func main() {
 	volumeUp := widget.NewButtonWithIcon("", theme.VolumeUpIcon(), func() {
 		streamPlayer.IncVolume()
 	})
-	volumeMute := widget.NewButtonWithIcon("", theme.VolumeMuteIcon(), func() {
+
+	var volumeMute *widget.Button
+
+	volumeMute = widget.NewButtonWithIcon("", theme.VolumeMuteIcon(), func() {
 		streamPlayer.Mute()
+		if streamPlayer.IsMuted() {
+			volumeMute.SetText("x")
+		} else {
+			volumeMute.SetText("")
+		}
 	})
 	controlContainer := container.NewHBox(
 		nowPlayingLabelHeader,
