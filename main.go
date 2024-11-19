@@ -60,7 +60,8 @@ import (
 
 // Enums and constants
 const RADIOSPIRAL_STREAM = "https://radiospiral.radio:8000/stream.mp3"
-const RADIOSPIRAL_JSON_ENDPOINT = "https://radiospiral.net/wp-json/radio/broadcast"
+const RADIOSPIRAL_SCHEDULE = "https://radiospiral.radio/api/station/radiospiral/schedule"
+const RADIOSPIRAL_NOWPLAYING = "https://radiospiral.radio/api/nowplaying/radiospiral"
 
 const (
 	Loading int = iota
@@ -77,40 +78,55 @@ func check(err error) {
 
 // JSON data we receive from the wp-json/radio/broadcast endpoint
 type BroadcastResponse struct {
-	Broadcast BroadcastInfo `json:"broadcast"`
-	Updated   int           `json:"updated"`
-	Success   bool          `json:"success"`
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	StartTime   int64  `json:"start_timestamp"`
+	IsNow       bool   `json:"is_now"`
 }
 
-type BroadcastInfo struct {
-	NowPlaying  NowPlayingInfo `json:"now_playing"`
-	NextShow    NextShowInfo   `json:"next_show"`
-	CurrentShow bool           `json:"current_show"`
+type StationResponse struct {
+	NowPlaying NowPlayingInfo `json:"now_playing"`
+	Listeners  ListenersInfo  `json:"listeners"`
+	Live       LiveInfo       `json:"live"`
 }
 
-type NowPlayingInfo struct {
+type ListenersInfo struct {
+	Total   int `json:"total"`
+	Unique  int `json:"unique"`
+	Current int `json:"current"`
+}
+
+type LiveInfo struct {
+	IsLive         bool   `json:"is_live"`
+	StreamerName   string `json:"streamer_name"`
+	BroadcastStart string `json:"broadcast_start"`
+	Art            string `json:"art"`
+}
+
+type SongInfo struct {
+	Id     string `json:"id"`
 	Text   string `json:"text"`
 	Artist string `json:"artist"`
 	Title  string `json:"title"`
+	Album  string `json:"album"`
+	Genre  string `json:"genre"`
+	Isrc   string `json:"isrc"`
+	Lyrics string `json:"lyrics"`
+	Art    string `json:"art"`
 }
 
-type NextShowInfo struct {
-	Day   string   `json:"day"`
-	Date  string   `json:"date"`
-	Start string   `json:"start"`
-	End   string   `json:"end"`
-	Show  ShowData `json:"show"`
-}
-
-type ShowData struct {
-	Name      string      `json:"name"`
-	AvatarUrl string      `json:"avatar_url"`
-	ImageUrl  string      `json:"image_url"`
-	Hosts     []HostsData `json:"hosts"`
-}
-
-type HostsData struct {
-	Name string `json:"name"`
+type NowPlayingInfo struct {
+	ShId      int      `json:"sh_id"`
+	PlayedAt  int64    `json:"played_at"`
+	Duration  int      `json:"duration"`
+	Playlist  string   `json:"playlist"`
+	Streamer  string   `json:"streamer"`
+	IsRequest bool     `json:"is_request"`
+	Song      SongInfo `json:"song"`
+	Elapsed   int      `json:"elapsed"`
+	Remaining int      `json:"remaining"`
 }
 
 // Load images from URLs
@@ -123,6 +139,32 @@ func loadImageURL(url string) image.Image {
 	img, _, err := image.Decode(resp.Body)
 	check(err)
 	return img
+}
+
+// Query the station info
+func queryStation() (*StationResponse, error) {
+	resp, err := http.Get(RADIOSPIRAL_NOWPLAYING)
+	if err != nil {
+		// If we get an error fetching the data, await a minute and retry
+		log.Println("[ERROR] Error when querying broadcast endpoint")
+		log.Println(err)
+		return nil, err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
+
+	if err != nil {
+		// We couldn't read the body, log the error, await a minute and retry
+		log.Println("[ERROR] Error when reading the body")
+		log.Println(err)
+		return nil, err
+	}
+
+	var response StationResponse
+	json.Unmarshal(body, &response)
+
+	return &response, nil
 }
 
 func main() {
@@ -168,23 +210,42 @@ func main() {
 	// Keep the status of the player
 	playStatus := Stopped
 
-	// Placeholder avatar
-	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
-
 	// Header section
 	radioSpiralHeaderImage := canvas.NewImageFromResource(resourceHeaderPng)
 	radioSpiralHeaderImage.SetMinSize(fyne.NewSize(400, 120))
 	radioSpiralHeaderImage.FillMode = canvas.ImageFillContain
 
-	// Next show section
-	showAvatar := canvas.NewImageFromImage(radioSpiralAvatar)
-	showAvatar.SetMinSize(fyne.NewSize(200, 200))
-	showCard := widget.NewCard("RadioSpiral", "", showAvatar)
-	centerCardContainer := container.NewCenter(showCard)
+	// Next show
+	nextShowHeader := widget.NewRichTextFromMarkdown("# Next Show:")
+	// nextShowHeader := widget.NewLabel("Next show:")
+	nextShowLabel := widget.NewRichTextFromMarkdown("")
+	nextShowDate := widget.NewLabel("")
+
+	nextShowLabelContainer := container.NewHBox(
+		layout.NewSpacer(),
+		nextShowLabel,
+		layout.NewSpacer(),
+	)
+
+	nextShowDateContainer := container.NewHBox(
+		layout.NewSpacer(),
+		nextShowDate,
+		layout.NewSpacer(),
+	)
+
+	nextShowDate.Alignment = fyne.TextAlignCenter
+	nextShowDate.Wrapping = fyne.TextWrapWord
+
+	// Placeholder avatar
+	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
+
+	// Album cover section
+	radioSpiralCanvas := canvas.NewImageFromImage(radioSpiralAvatar)
+	radioSpiralCanvas.SetMinSize(fyne.NewSize(200, 200))
+	albumCard := widget.NewCard("Now playing", "", radioSpiralCanvas)
+	centerCardContainer := container.NewCenter(albumCard)
 
 	// Player section
-	nowPlayingLabelHeader := widget.NewLabel("Now playing:")
-	nowPlayingLabel := widget.NewLabel("")
 	volumeDown := widget.NewButtonWithIcon("", theme.VolumeDownIcon(), func() {
 		streamPlayer.DecVolume()
 	})
@@ -202,16 +263,6 @@ func main() {
 			volumeMute.SetText("")
 		}
 	})
-	controlContainer := container.NewHBox(
-		nowPlayingLabelHeader,
-		layout.NewSpacer(),
-		volumeDown,
-		volumeUp,
-		volumeMute,
-	)
-
-	nowPlayingLabel.Alignment = fyne.TextAlignCenter
-	nowPlayingLabel.Wrapping = fyne.TextWrapWord
 
 	var playButton *widget.Button
 
@@ -240,6 +291,16 @@ func main() {
 		}
 	})
 
+	playButton.Importance = widget.HighImportance
+
+	controlContainer := container.NewHBox(
+		layout.NewSpacer(),
+		volumeDown,
+		volumeUp,
+		volumeMute,
+		layout.NewSpacer(),
+	)
+
 	// Process the output of ffmpeg here in a separate goroutine
 	go func() {
 		for {
@@ -266,7 +327,24 @@ func main() {
 						if strings.Contains(line, "StreamTitle: ") {
 							log.Println("Found new stream title, updating GUI")
 							newTitleParts := strings.Split(line, "StreamTitle: ")
-							nowPlayingLabel.SetText(newTitleParts[1])
+							albumCard.SetSubTitle(newTitleParts[1])
+							stationData, err := queryStation()
+							if err != nil {
+								log.Println("Received error")
+								continue
+							}
+							log.Printf("Received %s as art", stationData.NowPlaying.Song.Art)
+							if len(stationData.NowPlaying.Song.Art) > 0 {
+								log.Println("Fetching album art")
+								albumImg := loadImageURL(stationData.NowPlaying.Song.Art)
+								albumCanvas := canvas.NewImageFromImage(albumImg)
+								albumCanvas.SetMinSize(fyne.NewSize(200, 200))
+								albumCard.SetContent(albumCanvas)
+							} else {
+								albumCanvas := canvas.NewImageFromImage(radioSpiralAvatar)
+								albumCanvas.SetMinSize(fyne.NewSize(200, 200))
+								albumCard.SetContent(albumCanvas)
+							}
 						}
 					}
 				}
@@ -289,11 +367,12 @@ func main() {
 		radioSpiralHeaderImage,
 		container.NewCenter(widget.NewHyperlink("https://radiospiral.net", rsUrl)),
 		layout.NewSpacer(),
-		widget.NewLabel("Next show:"),
-		centerCardContainer,
+		nextShowHeader,
+		nextShowLabelContainer,
+		nextShowDateContainer,
 		layout.NewSpacer(),
+		centerCardContainer,
 		controlContainer,
-		nowPlayingLabel,
 		playButton,
 	))
 
@@ -302,7 +381,7 @@ func main() {
 	// and the shows data, update the GUI accordingly
 	go func() {
 		for {
-			resp, err := http.Get(RADIOSPIRAL_JSON_ENDPOINT)
+			resp, err := http.Get(RADIOSPIRAL_SCHEDULE)
 			if err != nil {
 				// If we get an error fetching the data, await a minute and retry
 				log.Println("[ERROR] Error when querying broadcast endpoint")
@@ -320,18 +399,30 @@ func main() {
 				continue
 			}
 
-			var broadcastResponse BroadcastResponse
+			var broadcastResponse []BroadcastResponse
 
 			json.Unmarshal(body, &broadcastResponse)
-			showCard.SetTitle(broadcastResponse.Broadcast.NextShow.Show.Name)
-			date := broadcastResponse.Broadcast.NextShow.Day + " " + broadcastResponse.Broadcast.NextShow.Date
-			host := ""
-			if len(broadcastResponse.Broadcast.NextShow.Show.Hosts) > 0 {
-				host = "by: " + broadcastResponse.Broadcast.NextShow.Show.Hosts[0].Name
+
+			var nextShow BroadcastResponse
+
+			for _, elem := range broadcastResponse {
+				if elem.Type != "playlist" {
+					nextShow = elem
+					break
+				}
 			}
-			showCard.SetSubTitle(date + " " + host)
-			showAvatar.Image = loadImageURL(broadcastResponse.Broadcast.NextShow.Show.AvatarUrl)
-			showAvatar.Refresh()
+
+			host := ""
+			if len(nextShow.Name) > 0 {
+				host = "by: " + nextShow.Name
+				date := time.Unix(nextShow.StartTime, 0)
+				dateString := date.Format(time.RFC850)
+				nextShowLabel.ParseMarkdown("## " + nextShow.Name + " " + host)
+				nextShowDate.SetText(dateString + " " + host)
+			} else {
+				nextShowLabel.ParseMarkdown("## Spud")
+				nextShowDate.SetText("")
+			}
 			time.Sleep(10 * time.Minute)
 		}
 	}()
