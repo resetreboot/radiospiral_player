@@ -53,6 +53,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -245,12 +246,17 @@ func main() {
 	albumCard := widget.NewCard("Now playing", "", radioSpiralCanvas)
 	centerCardContainer := container.NewCenter(albumCard)
 
+	volumeBind := binding.BindFloat(&streamPlayer.currentVolume)
+	volumeBar := widget.NewProgressBarWithData(volumeBind)
+
 	// Player section
 	volumeDown := widget.NewButtonWithIcon("", theme.VolumeDownIcon(), func() {
 		streamPlayer.DecVolume()
+		volumeBind.Reload()
 	})
 	volumeUp := widget.NewButtonWithIcon("", theme.VolumeUpIcon(), func() {
 		streamPlayer.IncVolume()
+		volumeBind.Reload()
 	})
 
 	var volumeMute *widget.Button
@@ -289,16 +295,20 @@ func main() {
 				streamPlayer.Play()
 			}
 		}
+		volumeBind.Reload()
 	})
 
 	playButton.Importance = widget.HighImportance
 
-	controlContainer := container.NewHBox(
-		layout.NewSpacer(),
+	controlContainer := container.NewBorder(
+		nil,
+		nil,
 		volumeDown,
-		volumeUp,
-		volumeMute,
-		layout.NewSpacer(),
+		container.NewHBox(
+			volumeUp,
+			volumeMute,
+		),
+		volumeBar,
 	)
 
 	// Process the output of ffmpeg here in a separate goroutine
@@ -333,10 +343,22 @@ func main() {
 								log.Println("Received error")
 								continue
 							}
-							log.Printf("Received %s as art", stationData.NowPlaying.Song.Art)
-							if len(stationData.NowPlaying.Song.Art) > 0 {
+
+							// Cover art retrieval
+							var coverArtURL string
+							if stationData.Live.IsLive {
+								log.Printf("Received %s as art", stationData.Live.Art)
+								albumCard.SetTitle("Live Show")
+								coverArtURL = stationData.Live.Art
+							} else {
+								log.Printf("Received %s as art", stationData.NowPlaying.Song.Art)
+								albumCard.SetTitle("Now playing")
+								coverArtURL = stationData.NowPlaying.Song.Art
+							}
+
+							if len(coverArtURL) > 0 {
 								log.Println("Fetching album art")
-								albumImg := loadImageURL(stationData.NowPlaying.Song.Art)
+								albumImg := loadImageURL(coverArtURL)
 								albumCanvas := canvas.NewImageFromImage(albumImg)
 								albumCanvas.SetMinSize(fyne.NewSize(200, 200))
 								albumCard.SetContent(albumCanvas)
