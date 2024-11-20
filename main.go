@@ -235,7 +235,7 @@ func main() {
 	)
 
 	nextShowDate.Alignment = fyne.TextAlignCenter
-	nextShowDate.Wrapping = fyne.TextWrapWord
+	nextShowDate.Wrapping = fyne.TextWrapOff
 
 	// Placeholder avatar
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
@@ -434,13 +434,12 @@ func main() {
 				}
 			}
 
-			host := ""
 			if len(nextShow.Name) > 0 {
-				host = "by: " + nextShow.Name
+				host := nextShow.Name
 				date := time.Unix(nextShow.StartTime, 0)
 				dateString := date.Format(time.RFC850)
-				nextShowLabel.ParseMarkdown("## " + nextShow.Name + " " + host)
-				nextShowDate.SetText(dateString + " " + host)
+				nextShowLabel.ParseMarkdown("## " + host)
+				nextShowDate.SetText(dateString)
 			} else {
 				nextShowLabel.ParseMarkdown("## Spud")
 				nextShowDate.SetText("")
