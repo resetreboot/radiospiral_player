@@ -1,3 +1,21 @@
+22/11/2024 José Carlos Cuevas <reset.reboot@posteo.net>
+
+    Upgraded to Fyne 2.5
+
+    Added a bar to display current volume
+
+    Improved current playback control layout
+
+    Using the card now to display current track and album art
+
+    Using new radio APIs to fetch next show
+
+    Detect there's a live show going on and display it accordingly
+
+    Working on Windows 10 too! 
+
+    And Raspberry Pi!
+
 19/12/2023 José Carlos Cuevas <reset.reboot@posteo.net>
 
     Improved the situation with ffmpeg, no need for cancelreader anymore

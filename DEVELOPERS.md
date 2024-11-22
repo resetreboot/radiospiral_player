@@ -14,7 +14,7 @@ We use a Makefile to build, generate and clean.
 
 ## Setting up the development environment
 
-Install MPlayer on your system. 
+Install ffmpeg on your system. 
 
 Ensure you are using the correct Golang version (we keep a
 `.tools-version` in the repo that will prompt you if you

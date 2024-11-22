@@ -1,10 +1,10 @@
-# RadioSpiral Player for GNU/Linux
+# RadioSpiral Player
 
-This is the official native GNU/Linux application to listen to RadioSpiral and keep informed
-about the upcoming shows. Self contained app, just requiring having MPlayer installed on the 
+This is the official native application to listen to RadioSpiral and keep informed
+about the upcoming shows. Self contained app, just requiring having ffmpeg installed on the 
 system.
 
-It uses Flyte as the GUI and MPlayer as the backend to stream from the radio.
+It uses Fyne as the GUI and ffmpeg as the backend to stream from the radio.
 
 ## Installation
 
