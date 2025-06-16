@@ -38,6 +38,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"image"
 	"io"
 	"log"
@@ -54,7 +55,6 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -169,6 +169,12 @@ func queryStation() (*StationResponse, error) {
 }
 
 func main() {
+	// Here we store the current song, since we will be using in
+	// several places
+	var currentSong string
+	var currentSongScrollIndex int
+	appRunning := true
+
 	PLAYER_CMD := "ffmpeg"
 
 	if runtime.GOOS == "windows" {
@@ -205,7 +211,7 @@ func main() {
 	app := app.New()
 	window := app.NewWindow("RadioSpiral Player")
 
-	window.Resize(fyne.NewSize(400, 600))
+	window.Resize(fyne.NewSize(400, 450))
 	window.SetIcon(resourceIconPng)
 
 	// Keep the status of the player
@@ -215,27 +221,6 @@ func main() {
 	radioSpiralHeaderImage := canvas.NewImageFromResource(resourceHeaderPng)
 	radioSpiralHeaderImage.SetMinSize(fyne.NewSize(400, 120))
 	radioSpiralHeaderImage.FillMode = canvas.ImageFillContain
-
-	// Next show
-	nextShowHeader := widget.NewRichTextFromMarkdown("# Next Show:")
-	// nextShowHeader := widget.NewLabel("Next show:")
-	nextShowLabel := widget.NewRichTextFromMarkdown("")
-	nextShowDate := widget.NewLabel("")
-
-	nextShowLabelContainer := container.NewHBox(
-		layout.NewSpacer(),
-		nextShowLabel,
-		layout.NewSpacer(),
-	)
-
-	nextShowDateContainer := container.NewHBox(
-		layout.NewSpacer(),
-		nextShowDate,
-		layout.NewSpacer(),
-	)
-
-	nextShowDate.Alignment = fyne.TextAlignCenter
-	nextShowDate.Wrapping = fyne.TextWrapOff
 
 	// Placeholder avatar
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
@@ -337,7 +322,9 @@ func main() {
 						if strings.Contains(line, "StreamTitle: ") {
 							log.Println("Found new stream title, updating GUI")
 							newTitleParts := strings.Split(line, "StreamTitle: ")
-							albumCard.SetSubTitle(newTitleParts[1])
+							currentSong = newTitleParts[1]
+							currentSongScrollIndex = 0
+							albumCard.SetSubTitle(fmt.Sprintf("%.*s", 30, currentSong))
 							stationData, err := queryStation()
 							if err != nil {
 								log.Println("Received error")
@@ -388,67 +375,32 @@ func main() {
 	window.SetContent(container.NewVBox(
 		radioSpiralHeaderImage,
 		container.NewCenter(widget.NewHyperlink("https://radiospiral.net", rsUrl)),
-		layout.NewSpacer(),
-		nextShowHeader,
-		nextShowLabelContainer,
-		nextShowDateContainer,
-		layout.NewSpacer(),
 		centerCardContainer,
 		controlContainer,
 		playButton,
 	))
 
-	// Now that everything is laid out, we can start this
-	// small goroutine every minute, retrieve the stream data
-	// and the shows data, update the GUI accordingly
+	// This small go routine will scroll the song title on the card if it is longer than 30
 	go func() {
 		for {
-			resp, err := http.Get(RADIOSPIRAL_SCHEDULE)
-			if err != nil {
-				// If we get an error fetching the data, await a minute and retry
-				log.Println("[ERROR] Error when querying broadcast endpoint")
-				log.Println(err)
-				time.Sleep(1 * time.Minute)
-				continue
+			if !appRunning {
+				break
 			}
-
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				// We couldn't read the body, log the error, await a minute and retry
-				log.Println("[ERROR] Error when reading the body")
-				log.Println(err)
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-
-			var broadcastResponse []BroadcastResponse
-
-			json.Unmarshal(body, &broadcastResponse)
-
-			var nextShow BroadcastResponse
-
-			for _, elem := range broadcastResponse {
-				if elem.Type != "playlist" {
-					nextShow = elem
-					break
+			time.Sleep(1 * time.Second)
+			if len(currentSong) > 30 {
+				topIndex := len(currentSong) - 30
+				currentSongScrollIndex += 1
+				if currentSongScrollIndex > topIndex {
+					currentSongScrollIndex = 0
 				}
+				scrolledTitle := currentSong[currentSongScrollIndex : currentSongScrollIndex+30]
+				albumCard.SetSubTitle(scrolledTitle)
 			}
-
-			if len(nextShow.Name) > 0 {
-				host := nextShow.Name
-				date := time.Unix(nextShow.StartTime, 0)
-				dateString := date.Format(time.RFC850)
-				nextShowLabel.ParseMarkdown("## " + host)
-				nextShowDate.SetText(dateString)
-			} else {
-				nextShowLabel.ParseMarkdown("## Spud")
-				nextShowDate.SetText("")
-			}
-			time.Sleep(10 * time.Minute)
 		}
 	}()
 
 	// Showtime!
 	window.ShowAndRun()
+	appRunning = false
 	streamPlayer.Close()
 }
