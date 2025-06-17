@@ -60,6 +60,7 @@ import (
 )
 
 // Enums and constants
+const MAX_CHARS = 28
 const RADIOSPIRAL_STREAM = "https://radiospiral.radio:8000/stream.mp3"
 const RADIOSPIRAL_SCHEDULE = "https://radiospiral.radio/api/station/radiospiral/schedule"
 const RADIOSPIRAL_NOWPLAYING = "https://radiospiral.radio/api/nowplaying/radiospiral"
@@ -324,7 +325,7 @@ func main() {
 							newTitleParts := strings.Split(line, "StreamTitle: ")
 							currentSong = newTitleParts[1]
 							currentSongScrollIndex = 0
-							albumCard.SetSubTitle(fmt.Sprintf("%.*s", 30, currentSong))
+							albumCard.SetSubTitle(fmt.Sprintf("%.*s", MAX_CHARS, currentSong))
 							stationData, err := queryStation()
 							if err != nil {
 								log.Println("Received error")
@@ -380,20 +381,20 @@ func main() {
 		playButton,
 	))
 
-	// This small go routine will scroll the song title on the card if it is longer than 30
+	// This small go routine will scroll the song title on the card if it is longer than MAX_CHARS
 	go func() {
 		for {
 			if !appRunning {
 				break
 			}
 			time.Sleep(1 * time.Second)
-			if len(currentSong) > 30 {
-				topIndex := len(currentSong) - 30
+			if len(currentSong) > MAX_CHARS {
+				topIndex := len(currentSong) - MAX_CHARS
 				currentSongScrollIndex += 1
 				if currentSongScrollIndex > topIndex {
 					currentSongScrollIndex = 0
 				}
-				scrolledTitle := currentSong[currentSongScrollIndex : currentSongScrollIndex+30]
+				scrolledTitle := currentSong[currentSongScrollIndex : currentSongScrollIndex+MAX_CHARS]
 				albumCard.SetSubTitle(scrolledTitle)
 			}
 		}
