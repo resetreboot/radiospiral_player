@@ -236,30 +236,6 @@ func main() {
 	radioSpiralHeaderImage.SetMinSize(fyne.NewSize(400, 120))
 	radioSpiralHeaderImage.FillMode = canvas.ImageFillContain
 
-	// Station selector
-	stationSelect := widget.NewSelect([]string{"RadioSpiral", "RadioSpiral Inner Sanctum", "RadioSpiral Outer Limits"},
-		func(r string) {
-			switch r {
-			case "RadioSpiral":
-				currentStream = RADIOSPIRAL_STREAM
-				currentNowPlayingApi = RADIOSPIRAL_NOWPLAYING
-			case "RadioSpiral Inner Sanctum":
-				currentStream = SANCTUM_STREAM
-				currentNowPlayingApi = SANCTUM_NOWPLAYING
-			case "RadioSpiral Outer Limits":
-				currentStream = OUTER_STREAM
-				currentNowPlayingApi = OUTER_NOWPLAYING
-			}
-
-			if streamPlayer.IsPlaying() {
-				streamPlayer.Stop()
-				streamPlayer.Load(currentStream)
-				streamPlayer.Play()
-			}
-		})
-	stationSelect.SetSelectedIndex(0)
-	stationSelect.Resize(fyne.NewSize(300, 20))
-
 	// Placeholder avatar
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
 
@@ -293,6 +269,35 @@ func main() {
 		}
 	})
 
+	// Station selector
+	stationSelect := widget.NewSelect([]string{"RadioSpiral", "RadioSpiral Inner Sanctum", "RadioSpiral Outer Limits"},
+		func(r string) {
+			switch r {
+			case "RadioSpiral":
+				currentStream = RADIOSPIRAL_STREAM
+				currentNowPlayingApi = RADIOSPIRAL_NOWPLAYING
+			case "RadioSpiral Inner Sanctum":
+				currentStream = SANCTUM_STREAM
+				currentNowPlayingApi = SANCTUM_NOWPLAYING
+			case "RadioSpiral Outer Limits":
+				currentStream = OUTER_STREAM
+				currentNowPlayingApi = OUTER_NOWPLAYING
+			}
+
+			if streamPlayer.IsPlaying() {
+				volume := streamPlayer.GetVolume()
+				streamPlayer.Stop()
+				streamPlayer.Load(currentStream)
+				streamPlayer.Play()
+				streamPlayer.SetVolume(volume)
+				volumeBind.Reload()
+			}
+		})
+
+	stationSelect.SetSelectedIndex(0)
+	stationSelect.Resize(fyne.NewSize(300, 20))
+
+	// Play button
 	var playButton *widget.Button
 
 	playButton = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {

@@ -185,3 +185,23 @@ func (player *StreamPlayer) DecVolume() {
 		player.otoPlayer.SetVolume(player.currentVolume)
 	}
 }
+
+func (player *StreamPlayer) SetVolume(volume float64) {
+	if player.IsPlaying() {
+		if volume > 1.0 {
+			player.otoPlayer.SetVolume(1.0)
+		} else if volume < 0.0 {
+			player.otoPlayer.SetVolume(0.0)
+		} else {
+			player.otoPlayer.SetVolume(volume)
+		}
+	}
+}
+
+func (player *StreamPlayer) GetVolume() float64 {
+	if player.IsPlaying() {
+		return player.otoPlayer.Volume()
+	} else {
+		return 0.0
+	}
+}
