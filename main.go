@@ -61,9 +61,18 @@ import (
 
 // Enums and constants
 const MAX_CHARS = 28
+
+// Main RadioSpiral
 const RADIOSPIRAL_STREAM = "https://radiospiral.radio:8000/stream.mp3"
-const RADIOSPIRAL_SCHEDULE = "https://radiospiral.radio/api/station/radiospiral/schedule"
 const RADIOSPIRAL_NOWPLAYING = "https://radiospiral.radio/api/nowplaying/radiospiral"
+
+// Inner Sanctum
+const SANCTUM_STREAM = "https://radiospiral.radio:8010/radio.mp3"
+const SANCTUM_NOWPLAYING = "https://radiospiral.radio/api/nowplaying/rs_inner_sanctum"
+
+// Outer Limits
+const OUTER_STREAM = "https://radiospiral.radio:8020/radio.mp3"
+const OUTER_NOWPLAYING = "https://radiospiral.radio/api/nowplaying/rs_outer_limits"
 
 const (
 	Loading int = iota
@@ -144,8 +153,8 @@ func loadImageURL(url string) image.Image {
 }
 
 // Query the station info
-func queryStation() (*StationResponse, error) {
-	resp, err := http.Get(RADIOSPIRAL_NOWPLAYING)
+func queryStation(apiEndpoint string) (*StationResponse, error) {
+	resp, err := http.Get(apiEndpoint)
 	if err != nil {
 		// If we get an error fetching the data, await a minute and retry
 		log.Println("[ERROR] Error when querying broadcast endpoint")
@@ -174,6 +183,10 @@ func main() {
 	// several places
 	var currentSong string
 	var currentSongScrollIndex int
+
+	currentStream := RADIOSPIRAL_STREAM
+	currentNowPlayingApi := RADIOSPIRAL_NOWPLAYING
+
 	appRunning := true
 
 	PLAYER_CMD := "ffmpeg"
@@ -223,6 +236,30 @@ func main() {
 	radioSpiralHeaderImage.SetMinSize(fyne.NewSize(400, 120))
 	radioSpiralHeaderImage.FillMode = canvas.ImageFillContain
 
+	// Station selector
+	stationSelect := widget.NewSelect([]string{"RadioSpiral", "RadioSpiral Inner Sanctum", "RadioSpiral Outer Limits"},
+		func(r string) {
+			switch r {
+			case "RadioSpiral":
+				currentStream = RADIOSPIRAL_STREAM
+				currentNowPlayingApi = RADIOSPIRAL_NOWPLAYING
+			case "RadioSpiral Inner Sanctum":
+				currentStream = SANCTUM_STREAM
+				currentNowPlayingApi = SANCTUM_NOWPLAYING
+			case "RadioSpiral Outer Limits":
+				currentStream = OUTER_STREAM
+				currentNowPlayingApi = OUTER_NOWPLAYING
+			}
+
+			if streamPlayer.IsPlaying() {
+				streamPlayer.Stop()
+				streamPlayer.Load(currentStream)
+				streamPlayer.Play()
+			}
+		})
+	stationSelect.SetSelectedIndex(0)
+	stationSelect.Resize(fyne.NewSize(300, 20))
+
 	// Placeholder avatar
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
 
@@ -265,7 +302,7 @@ func main() {
 		if !streamPlayer.IsPlaying() {
 			playButton.SetIcon(theme.MediaStopIcon())
 			playButton.SetText("(Buffering)")
-			streamPlayer.Load(RADIOSPIRAL_STREAM)
+			streamPlayer.Load(currentStream)
 			streamPlayer.Play()
 			playStatus = Loading
 		} else {
@@ -277,7 +314,7 @@ func main() {
 				playStatus = Loading
 				playButton.SetText("(Buffering)")
 				playButton.SetIcon(theme.MediaStopIcon())
-				streamPlayer.Load(RADIOSPIRAL_STREAM)
+				streamPlayer.Load(currentStream)
 				streamPlayer.Play()
 			}
 		}
@@ -326,7 +363,7 @@ func main() {
 							currentSong = newTitleParts[1]
 							currentSongScrollIndex = 0
 							albumCard.SetSubTitle(fmt.Sprintf("%.*s", MAX_CHARS, currentSong))
-							stationData, err := queryStation()
+							stationData, err := queryStation(currentNowPlayingApi)
 							if err != nil {
 								log.Println("Received error")
 								continue
@@ -376,6 +413,7 @@ func main() {
 	window.SetContent(container.NewVBox(
 		radioSpiralHeaderImage,
 		container.NewCenter(widget.NewHyperlink("https://radiospiral.net", rsUrl)),
+		container.NewPadded(stationSelect),
 		centerCardContainer,
 		controlContainer,
 		playButton,
