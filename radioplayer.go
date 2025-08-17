@@ -26,6 +26,7 @@ package main
 import (
 	"io"
 	"log"
+	"math"
 	"os/exec"
 	"strings"
 
@@ -56,6 +57,7 @@ type StreamPlayer struct {
 	otoContext    *oto.Context
 	otoPlayer     *oto.Player
 	currentVolume float64
+	savedVolume   float64
 }
 
 func (player *StreamPlayer) IsPlaying() bool {
@@ -152,10 +154,12 @@ func (player *StreamPlayer) IsMuted() bool {
 func (player *StreamPlayer) Mute() {
 	if player.IsPlaying() {
 		if player.otoPlayer.Volume() > 0 {
-			player.currentVolume = player.otoPlayer.Volume()
-			player.otoPlayer.SetVolume(0.0)
+			player.savedVolume = player.currentVolume
+			player.currentVolume = 0.0
+			player.SetVolume(0.0)
 		} else {
-			player.otoPlayer.SetVolume(player.currentVolume)
+			player.currentVolume = player.savedVolume
+			player.SetVolume(player.savedVolume)
 		}
 	}
 }
@@ -169,20 +173,14 @@ func (player *StreamPlayer) Stop() {
 func (player *StreamPlayer) IncVolume() {
 	if player.IsPlaying() {
 		player.currentVolume += 0.05
-		if player.currentVolume >= 1.0 {
-			player.currentVolume = 1.0
-		}
-		player.otoPlayer.SetVolume(player.currentVolume)
+		player.SetVolume(player.currentVolume)
 	}
 }
 
 func (player *StreamPlayer) DecVolume() {
 	if player.IsPlaying() {
 		player.currentVolume -= 0.05
-		if player.currentVolume <= 0.0 {
-			player.currentVolume = 0.0
-		}
-		player.otoPlayer.SetVolume(player.currentVolume)
+		player.SetVolume(player.currentVolume)
 	}
 }
 
@@ -193,7 +191,13 @@ func (player *StreamPlayer) SetVolume(volume float64) {
 		} else if volume < 0.0 {
 			player.otoPlayer.SetVolume(0.0)
 		} else {
-			player.otoPlayer.SetVolume(volume)
+			// We make the volume exponential so it decreases
+			// in a way the human ear really feels it
+			expVolume := math.Exp(4*volume - 4)
+			if expVolume < 0.1 {
+				expVolume = 0.0
+			}
+			player.otoPlayer.SetVolume(expVolume)
 		}
 	}
 }

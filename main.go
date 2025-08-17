@@ -267,6 +267,7 @@ func main() {
 		} else {
 			volumeMute.SetText("")
 		}
+		volumeBind.Reload()
 	})
 
 	// Station selector
