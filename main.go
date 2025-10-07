@@ -56,7 +56,7 @@ import (
 )
 
 // Enums and constants
-const MAX_CHARS = 28
+const MAX_CHARS = 24
 
 const (
 	Loading int = iota
