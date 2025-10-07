@@ -36,13 +36,9 @@ package main
  */
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
-	"image"
-	"io"
 	"log"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -62,18 +58,6 @@ import (
 // Enums and constants
 const MAX_CHARS = 28
 
-// Main RadioSpiral
-const RADIOSPIRAL_STREAM = "https://radiospiral.radio:8000/stream.mp3"
-const RADIOSPIRAL_NOWPLAYING = "https://radiospiral.radio/api/nowplaying/radiospiral"
-
-// Inner Sanctum
-const SANCTUM_STREAM = "https://radiospiral.radio:8010/radio.mp3"
-const SANCTUM_NOWPLAYING = "https://radiospiral.radio/api/nowplaying/rs_inner_sanctum"
-
-// Outer Limits
-const OUTER_STREAM = "https://radiospiral.radio:8020/radio.mp3"
-const OUTER_NOWPLAYING = "https://radiospiral.radio/api/nowplaying/rs_outer_limits"
-
 const (
 	Loading int = iota
 	Playing
@@ -87,105 +71,17 @@ func check(err error) {
 	}
 }
 
-// JSON data we receive from the wp-json/radio/broadcast endpoint
-type BroadcastResponse struct {
-	Type        string `json:"type"`
-	Name        string `json:"name"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	StartTime   int64  `json:"start_timestamp"`
-	IsNow       bool   `json:"is_now"`
-}
-
-type StationResponse struct {
-	NowPlaying NowPlayingInfo `json:"now_playing"`
-	Listeners  ListenersInfo  `json:"listeners"`
-	Live       LiveInfo       `json:"live"`
-}
-
-type ListenersInfo struct {
-	Total   int `json:"total"`
-	Unique  int `json:"unique"`
-	Current int `json:"current"`
-}
-
-type LiveInfo struct {
-	IsLive         bool   `json:"is_live"`
-	StreamerName   string `json:"streamer_name"`
-	BroadcastStart string `json:"broadcast_start"`
-	Art            string `json:"art"`
-}
-
-type SongInfo struct {
-	Id     string `json:"id"`
-	Text   string `json:"text"`
-	Artist string `json:"artist"`
-	Title  string `json:"title"`
-	Album  string `json:"album"`
-	Genre  string `json:"genre"`
-	Isrc   string `json:"isrc"`
-	Lyrics string `json:"lyrics"`
-	Art    string `json:"art"`
-}
-
-type NowPlayingInfo struct {
-	ShId      int      `json:"sh_id"`
-	PlayedAt  int64    `json:"played_at"`
-	Duration  int      `json:"duration"`
-	Playlist  string   `json:"playlist"`
-	Streamer  string   `json:"streamer"`
-	IsRequest bool     `json:"is_request"`
-	Song      SongInfo `json:"song"`
-	Elapsed   int      `json:"elapsed"`
-	Remaining int      `json:"remaining"`
-}
-
-// Load images from URLs
-func loadImageURL(url string) image.Image {
-	parts := strings.Split(url, "?")
-	resp, err := http.Get(parts[0])
-	check(err)
-
-	defer resp.Body.Close()
-	img, _, err := image.Decode(resp.Body)
-	check(err)
-	return img
-}
-
-// Query the station info
-func queryStation(apiEndpoint string) (*StationResponse, error) {
-	resp, err := http.Get(apiEndpoint)
-	if err != nil {
-		// If we get an error fetching the data, await a minute and retry
-		log.Println("[ERROR] Error when querying broadcast endpoint")
-		log.Println(err)
-		return nil, err
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	defer resp.Body.Close()
-
-	if err != nil {
-		// We couldn't read the body, log the error, await a minute and retry
-		log.Println("[ERROR] Error when reading the body")
-		log.Println(err)
-		return nil, err
-	}
-
-	var response StationResponse
-	json.Unmarshal(body, &response)
-
-	return &response, nil
-}
-
 func main() {
 	// Here we store the current song, since we will be using in
 	// several places
 	var currentSong string
 	var currentSongScrollIndex int
 
-	currentStream := RADIOSPIRAL_STREAM
-	currentNowPlayingApi := RADIOSPIRAL_NOWPLAYING
+	stations, err := fetchStations()
+
+	check(err)
+
+	currentStation := stations[0]
 
 	appRunning := true
 
@@ -271,24 +167,22 @@ func main() {
 	})
 
 	// Station selector
-	stationSelect := widget.NewSelect([]string{"RadioSpiral", "RadioSpiral Inner Sanctum", "RadioSpiral Outer Limits"},
+	var stationSelect *widget.Select
+	stationNames := make([]string, len(stations))
+
+	for i, elem := range stations {
+		stationNames[i] = elem.Name
+	}
+
+	stationSelect = widget.NewSelect(stationNames,
 		func(r string) {
-			switch r {
-			case "RadioSpiral":
-				currentStream = RADIOSPIRAL_STREAM
-				currentNowPlayingApi = RADIOSPIRAL_NOWPLAYING
-			case "RadioSpiral Inner Sanctum":
-				currentStream = SANCTUM_STREAM
-				currentNowPlayingApi = SANCTUM_NOWPLAYING
-			case "RadioSpiral Outer Limits":
-				currentStream = OUTER_STREAM
-				currentNowPlayingApi = OUTER_NOWPLAYING
-			}
+			idx := stationSelect.SelectedIndex()
+			currentStation = stations[idx]
 
 			if streamPlayer.IsPlaying() {
 				volume := streamPlayer.GetVolume()
 				streamPlayer.Stop()
-				streamPlayer.Load(currentStream)
+				streamPlayer.Load(currentStation.ListenUrl)
 				streamPlayer.Play()
 				streamPlayer.SetVolume(volume)
 				volumeBind.Reload()
@@ -308,7 +202,7 @@ func main() {
 		if !streamPlayer.IsPlaying() {
 			playButton.SetIcon(theme.MediaStopIcon())
 			playButton.SetText("(Buffering)")
-			streamPlayer.Load(currentStream)
+			streamPlayer.Load(currentStation.ListenUrl)
 			streamPlayer.Play()
 			playStatus = Loading
 		} else {
@@ -320,7 +214,7 @@ func main() {
 				playStatus = Loading
 				playButton.SetText("(Buffering)")
 				playButton.SetIcon(theme.MediaStopIcon())
-				streamPlayer.Load(currentStream)
+				streamPlayer.Load(currentStation.ListenUrl)
 				streamPlayer.Play()
 			}
 		}
@@ -369,7 +263,7 @@ func main() {
 							currentSong = newTitleParts[1]
 							currentSongScrollIndex = 0
 							albumCard.SetSubTitle(fmt.Sprintf("%.*s", MAX_CHARS, currentSong))
-							stationData, err := queryStation(currentNowPlayingApi)
+							stationData, err := queryStation(currentStation)
 							if err != nil {
 								log.Println("Received error")
 								continue
