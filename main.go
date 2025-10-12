@@ -229,17 +229,19 @@ func main() {
 
 	playButton.Importance = widget.HighImportance
 
-	controlContainer := container.NewBorder(
+	volumeContainer := container.NewBorder(
 		nil,
 		nil,
-		container.NewHBox(
-			volumeMute,
-			volumeDown,
-		),
-		container.NewHBox(
-			volumeUp,
-			volumeTop,
-		),
+		//	container.NewHBox(
+		//		volumeMute,
+		//		volumeDown,
+		//	),
+		//	container.NewHBox(
+		//		volumeUp,
+		//		volumeTop,
+		//	),
+		volumeDown,
+		volumeUp,
 		volumeBar,
 	)
 
@@ -318,14 +320,22 @@ func main() {
 		log.Println("Error generating RadioSpiral url")
 	}
 
+	controlContainer := container.NewBorder(
+		nil,
+		nil,
+		volumeMute,
+		volumeTop,
+		playButton,
+	)
+
 	// Layout the whole thing
 	window.SetContent(container.NewVBox(
 		radioSpiralHeaderImage,
 		container.NewCenter(widget.NewHyperlink("https://radiospiral.net", rsUrl)),
 		container.NewPadded(stationSelect),
 		centerCardContainer,
+		volumeContainer,
 		controlContainer,
-		playButton,
 	))
 
 	// This small go routine will scroll the song title on the card if it is longer than MAX_CHARS
