@@ -166,6 +166,12 @@ func main() {
 		volumeBind.Reload()
 	})
 
+	volumeTop := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
+		streamPlayer.SetVolume(1.0)
+		streamPlayer.currentVolume = 1.0
+		volumeBind.Reload()
+	})
+
 	// Station selector
 	var stationSelect *widget.Select
 	stationNames := make([]string, len(stations))
@@ -226,10 +232,13 @@ func main() {
 	controlContainer := container.NewBorder(
 		nil,
 		nil,
-		volumeDown,
+		container.NewHBox(
+			volumeMute,
+			volumeDown,
+		),
 		container.NewHBox(
 			volumeUp,
-			volumeMute,
+			volumeTop,
 		),
 		volumeBar,
 	)
