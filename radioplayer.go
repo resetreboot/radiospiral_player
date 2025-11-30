@@ -76,9 +76,9 @@ func (player *StreamPlayer) Load(stream_url string) {
 		if is_playlist {
 			// TODO: Check ffmpeg's ability to deal with playlists
 			// player.command = exec.Command(player.player_name, "-quiet", "-playlist", stream_url)
-			player.command = exec.Command(player.player_name, "-nodisp", "-loglevel", "verbose", "-playlist", stream_url)
+			player.command = exec.Command(player.player_name, "-nodisp", "-loglevel", "verbose", "-playlist", "-af", "pan=stereo|c0=c1|c1=c0", stream_url)
 		} else {
-			player.command = exec.Command(player.player_name, "-loglevel", "verbose", "-i", stream_url, "-f", "wav", "-")
+			player.command = exec.Command(player.player_name, "-loglevel", "verbose", "-i", stream_url, "-f", "wav", "-af", "pan=stereo|c0=c1|c1=c0", "-")
 		}
 
 		// In to send things over stdin to ffmpeg
@@ -193,7 +193,8 @@ func (player *StreamPlayer) SetVolume(volume float64) {
 		} else {
 			// We make the volume exponential so it decreases
 			// in a way the human ear really feels it
-			expVolume := math.Exp(4*volume - 4)
+			// expVolume := math.Exp(4*volume - 4)
+			expVolume := math.Pow(volume, 2)
 			if expVolume < 0.1 {
 				expVolume = 0.0
 			}
