@@ -36,6 +36,7 @@ package main
  */
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
@@ -71,11 +72,27 @@ func check(err error) {
 	}
 }
 
+func initLogging() (*os.File, error) {
+	// Use home app data directory instead of CWD
+	homeDir, _ := os.UserHomeDir()
+	logPath := filepath.Join(homeDir, ".local/share/radiospiral", "radiospiral.log")
+
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, err
+	}
+	log.SetOutput(file)
+	return file, nil
+}
+
 func main() {
 	// Here we store the current song, since we will be using in
 	// several places
 	var currentSong string
 	var currentSongScrollIndex int
+
+	// Logfile
+	var logFile *os.File
 
 	stations, err := fetchStations()
 
@@ -103,10 +120,10 @@ func main() {
 	flag.Parse()
 
 	if *loggingToFilePtr {
-		logFile, err := os.OpenFile("radiospiral.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-		check(err)
-		defer logFile.Close()
-		log.SetOutput(logFile)
+		logFile, err = initLogging()
+		if err != nil {
+			fmt.Println("WARNING: Couldn't create the log file")
+		}
 	}
 
 	log.Println("Starting the app")
@@ -247,69 +264,66 @@ func main() {
 
 	// Process the output of ffmpeg here in a separate goroutine
 	go func() {
+		var scanner *bufio.Scanner
 		for {
 			if streamPlayer.out != nil {
-				for {
-					var data [255]byte
-					_, err := streamPlayer.out.Read(data[:])
+				scanner = bufio.NewScanner(streamPlayer.out)
+			} else {
+				continue
+			}
+			for scanner.Scan() {
+				line := scanner.Text()
+				// Log, if enabled, the output of StreamPlayer
+				if *loggingToFilePtr {
+					log.Print("[" + streamPlayer.player_name + "] " + line)
+				}
+				if strings.Contains(line, "Output #0") {
+					playStatus = Playing
+					playButton.SetText("")
+				}
+				// Check if there's an updated title and reflect it on the
+				// GUI
+				if strings.Contains(line, "StreamTitle: ") {
+					log.Println("Found new stream title, updating GUI")
+					newTitleParts := strings.Split(line, "StreamTitle: ")
+					currentSong = newTitleParts[1]
+					currentSongScrollIndex = 0
+					albumCard.SetSubTitle(fmt.Sprintf("%.*s", MAX_CHARS, currentSong))
+					stationData, err := queryStation(currentStation)
 					if err != nil {
-						log.Println(err)
-						break
+						log.Println("Received error")
+						continue
 					}
-					lines := strings.Split(string(data[:]), "\n")
-					for _, line := range lines {
-						// Log, if enabled, the output of StreamPlayer
-						if *loggingToFilePtr {
-							log.Print("[" + streamPlayer.player_name + "] " + line)
-						}
-						if strings.Contains(line, "Output #0") {
-							playStatus = Playing
-							playButton.SetText("")
-						}
-						// Check if there's an updated title and reflect it on the
-						// GUI
-						if strings.Contains(line, "StreamTitle: ") {
-							log.Println("Found new stream title, updating GUI")
-							newTitleParts := strings.Split(line, "StreamTitle: ")
-							currentSong = newTitleParts[1]
-							currentSongScrollIndex = 0
-							albumCard.SetSubTitle(fmt.Sprintf("%.*s", MAX_CHARS, currentSong))
-							stationData, err := queryStation(currentStation)
-							if err != nil {
-								log.Println("Received error")
-								continue
-							}
 
-							// Cover art retrieval
-							var coverArtURL string
-							if stationData.Live.IsLive {
-								log.Printf("Received %s as art", stationData.Live.Art)
-								albumCard.SetTitle("Live Show")
-								coverArtURL = stationData.Live.Art
-							} else {
-								log.Printf("Received %s as art", stationData.NowPlaying.Song.Art)
-								albumCard.SetTitle("Now playing")
-								coverArtURL = stationData.NowPlaying.Song.Art
-							}
+					// Cover art retrieval
+					var coverArtURL string
+					if stationData.Live.IsLive {
+						log.Printf("Received %s as art", stationData.Live.Art)
+						albumCard.SetTitle("Live Show")
+						coverArtURL = stationData.Live.Art
+					} else {
+						log.Printf("Received %s as art", stationData.NowPlaying.Song.Art)
+						albumCard.SetTitle("Now playing")
+						coverArtURL = stationData.NowPlaying.Song.Art
+					}
 
-							if len(coverArtURL) > 0 {
-								log.Println("Fetching album art")
-								albumImg := loadImageURL(coverArtURL)
-								albumCanvas := canvas.NewImageFromImage(albumImg)
-								albumCanvas.SetMinSize(fyne.NewSize(200, 200))
-								albumCard.SetContent(albumCanvas)
-							} else {
-								albumCanvas := canvas.NewImageFromImage(radioSpiralAvatar)
-								albumCanvas.SetMinSize(fyne.NewSize(200, 200))
-								albumCard.SetContent(albumCanvas)
-							}
-						}
+					if len(coverArtURL) > 0 {
+						log.Println("Fetching album art")
+						albumImg := loadImageURL(coverArtURL)
+						albumCanvas := canvas.NewImageFromImage(albumImg)
+						albumCanvas.SetMinSize(fyne.NewSize(200, 200))
+						albumCard.SetContent(albumCanvas)
+					} else {
+						albumCanvas := canvas.NewImageFromImage(radioSpiralAvatar)
+						albumCanvas.SetMinSize(fyne.NewSize(200, 200))
+						albumCard.SetContent(albumCanvas)
 					}
 				}
-			} else {
-				// To avoid high CPU usage, we wait some milliseconds before testing
-				// again for the change in streamPlayer.out from nil to ReadCloser
+			}
+			if err := scanner.Err(); err != nil {
+				log.Println("FFMpeg stream not ready or ended. Waiting before restarting")
 				time.Sleep(200 * time.Millisecond)
+				scanner = bufio.NewScanner(streamPlayer.out)
 			}
 		}
 	}()
@@ -357,8 +371,15 @@ func main() {
 		}
 	}()
 
+	// If the window is closed, clean all stuff
+	window.SetOnClosed(func() {
+		streamPlayer.Close()
+		appRunning = false
+		if logFile != nil {
+			defer logFile.Close()
+		}
+	})
+
 	// Showtime!
 	window.ShowAndRun()
-	appRunning = false
-	streamPlayer.Close()
 }
