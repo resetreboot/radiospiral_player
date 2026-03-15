@@ -269,6 +269,7 @@ func main() {
 			if streamPlayer.out != nil {
 				scanner = bufio.NewScanner(streamPlayer.out)
 			} else {
+				time.Sleep(20 * time.Millisecond)
 				continue
 			}
 			for scanner.Scan() {
