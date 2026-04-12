@@ -215,6 +215,11 @@ func main() {
 	stationSelect.SetSelectedIndex(0)
 	stationSelect.Resize(fyne.NewSize(300, 20))
 
+	if len(stations) == 1 {
+		// No need to show extra stations if they are not present
+		stationSelect.Hide()
+	}
+
 	// Play button
 	var playButton *widget.Button
 
