@@ -36,13 +36,10 @@ package main
  */
 
 import (
-	"encoding/json"
+	"bufio"
 	"flag"
 	"fmt"
-	"image"
-	"io"
 	"log"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -60,10 +57,7 @@ import (
 )
 
 // Enums and constants
-const MAX_CHARS = 28
-const RADIOSPIRAL_STREAM = "https://radiospiral.radio:8000/stream.mp3"
-const RADIOSPIRAL_SCHEDULE = "https://radiospiral.radio/api/station/radiospiral/schedule"
-const RADIOSPIRAL_NOWPLAYING = "https://radiospiral.radio/api/nowplaying/radiospiral"
+const MAX_CHARS = 24
 
 const (
 	Loading int = iota
@@ -78,95 +72,17 @@ func check(err error) {
 	}
 }
 
-// JSON data we receive from the wp-json/radio/broadcast endpoint
-type BroadcastResponse struct {
-	Type        string `json:"type"`
-	Name        string `json:"name"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	StartTime   int64  `json:"start_timestamp"`
-	IsNow       bool   `json:"is_now"`
-}
+func initLogging() (*os.File, error) {
+	// Use home app data directory instead of CWD
+	homeDir, _ := os.UserHomeDir()
+	logPath := filepath.Join(homeDir, ".local/share/radiospiral", "radiospiral.log")
 
-type StationResponse struct {
-	NowPlaying NowPlayingInfo `json:"now_playing"`
-	Listeners  ListenersInfo  `json:"listeners"`
-	Live       LiveInfo       `json:"live"`
-}
-
-type ListenersInfo struct {
-	Total   int `json:"total"`
-	Unique  int `json:"unique"`
-	Current int `json:"current"`
-}
-
-type LiveInfo struct {
-	IsLive         bool   `json:"is_live"`
-	StreamerName   string `json:"streamer_name"`
-	BroadcastStart string `json:"broadcast_start"`
-	Art            string `json:"art"`
-}
-
-type SongInfo struct {
-	Id     string `json:"id"`
-	Text   string `json:"text"`
-	Artist string `json:"artist"`
-	Title  string `json:"title"`
-	Album  string `json:"album"`
-	Genre  string `json:"genre"`
-	Isrc   string `json:"isrc"`
-	Lyrics string `json:"lyrics"`
-	Art    string `json:"art"`
-}
-
-type NowPlayingInfo struct {
-	ShId      int      `json:"sh_id"`
-	PlayedAt  int64    `json:"played_at"`
-	Duration  int      `json:"duration"`
-	Playlist  string   `json:"playlist"`
-	Streamer  string   `json:"streamer"`
-	IsRequest bool     `json:"is_request"`
-	Song      SongInfo `json:"song"`
-	Elapsed   int      `json:"elapsed"`
-	Remaining int      `json:"remaining"`
-}
-
-// Load images from URLs
-func loadImageURL(url string) image.Image {
-	parts := strings.Split(url, "?")
-	resp, err := http.Get(parts[0])
-	check(err)
-
-	defer resp.Body.Close()
-	img, _, err := image.Decode(resp.Body)
-	check(err)
-	return img
-}
-
-// Query the station info
-func queryStation() (*StationResponse, error) {
-	resp, err := http.Get(RADIOSPIRAL_NOWPLAYING)
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		// If we get an error fetching the data, await a minute and retry
-		log.Println("[ERROR] Error when querying broadcast endpoint")
-		log.Println(err)
 		return nil, err
 	}
-
-	body, err := io.ReadAll(resp.Body)
-	defer resp.Body.Close()
-
-	if err != nil {
-		// We couldn't read the body, log the error, await a minute and retry
-		log.Println("[ERROR] Error when reading the body")
-		log.Println(err)
-		return nil, err
-	}
-
-	var response StationResponse
-	json.Unmarshal(body, &response)
-
-	return &response, nil
+	log.SetOutput(file)
+	return file, nil
 }
 
 func main() {
@@ -174,6 +90,16 @@ func main() {
 	// several places
 	var currentSong string
 	var currentSongScrollIndex int
+
+	// Logfile
+	var logFile *os.File
+
+	stations, err := fetchStations()
+
+	check(err)
+
+	currentStation := stations[0]
+
 	appRunning := true
 
 	PLAYER_CMD := "ffmpeg"
@@ -194,10 +120,10 @@ func main() {
 	flag.Parse()
 
 	if *loggingToFilePtr {
-		logFile, err := os.OpenFile("radiospiral.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-		check(err)
-		defer logFile.Close()
-		log.SetOutput(logFile)
+		logFile, err = initLogging()
+		if err != nil {
+			fmt.Println("WARNING: Couldn't create the log file")
+		}
 	}
 
 	log.Println("Starting the app")
@@ -254,8 +180,47 @@ func main() {
 		} else {
 			volumeMute.SetText("")
 		}
+		volumeBind.Reload()
 	})
 
+	volumeTop := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
+		streamPlayer.SetVolume(1.0)
+		streamPlayer.currentVolume = 1.0
+		volumeBind.Reload()
+	})
+
+	// Station selector
+	var stationSelect *widget.Select
+	stationNames := make([]string, len(stations))
+
+	for i, elem := range stations {
+		stationNames[i] = elem.Name
+	}
+
+	stationSelect = widget.NewSelect(stationNames,
+		func(r string) {
+			idx := stationSelect.SelectedIndex()
+			currentStation = stations[idx]
+
+			if streamPlayer.IsPlaying() {
+				volume := streamPlayer.GetVolume()
+				streamPlayer.Stop()
+				streamPlayer.Load(currentStation.ListenUrl)
+				streamPlayer.Play()
+				streamPlayer.SetVolume(volume)
+				volumeBind.Reload()
+			}
+		})
+
+	stationSelect.SetSelectedIndex(0)
+	stationSelect.Resize(fyne.NewSize(300, 20))
+
+	if len(stations) == 1 {
+		// No need to show extra stations if they are not present
+		stationSelect.Hide()
+	}
+
+	// Play button
 	var playButton *widget.Button
 
 	playButton = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
@@ -265,7 +230,7 @@ func main() {
 		if !streamPlayer.IsPlaying() {
 			playButton.SetIcon(theme.MediaStopIcon())
 			playButton.SetText("(Buffering)")
-			streamPlayer.Load(RADIOSPIRAL_STREAM)
+			streamPlayer.Load(currentStation.ListenUrl)
 			streamPlayer.Play()
 			playStatus = Loading
 		} else {
@@ -277,7 +242,7 @@ func main() {
 				playStatus = Loading
 				playButton.SetText("(Buffering)")
 				playButton.SetIcon(theme.MediaStopIcon())
-				streamPlayer.Load(RADIOSPIRAL_STREAM)
+				streamPlayer.Load(currentStation.ListenUrl)
 				streamPlayer.Play()
 			}
 		}
@@ -286,82 +251,85 @@ func main() {
 
 	playButton.Importance = widget.HighImportance
 
-	controlContainer := container.NewBorder(
+	volumeContainer := container.NewBorder(
 		nil,
 		nil,
+		//	container.NewHBox(
+		//		volumeMute,
+		//		volumeDown,
+		//	),
+		//	container.NewHBox(
+		//		volumeUp,
+		//		volumeTop,
+		//	),
 		volumeDown,
-		container.NewHBox(
-			volumeUp,
-			volumeMute,
-		),
+		volumeUp,
 		volumeBar,
 	)
 
 	// Process the output of ffmpeg here in a separate goroutine
 	go func() {
+		var scanner *bufio.Scanner
 		for {
 			if streamPlayer.out != nil {
-				for {
-					var data [255]byte
-					_, err := streamPlayer.out.Read(data[:])
+				scanner = bufio.NewScanner(streamPlayer.out)
+			} else {
+				time.Sleep(20 * time.Millisecond)
+				continue
+			}
+			for scanner.Scan() {
+				line := scanner.Text()
+				// Log, if enabled, the output of StreamPlayer
+				if *loggingToFilePtr {
+					log.Print("[" + streamPlayer.player_name + "] " + line)
+				}
+				if strings.Contains(line, "Output #0") {
+					playStatus = Playing
+					playButton.SetText("")
+				}
+				// Check if there's an updated title and reflect it on the
+				// GUI
+				if strings.Contains(line, "StreamTitle: ") {
+					log.Println("Found new stream title, updating GUI")
+					newTitleParts := strings.Split(line, "StreamTitle: ")
+					currentSong = newTitleParts[1]
+					currentSongScrollIndex = 0
+					albumCard.SetSubTitle(fmt.Sprintf("%.*s", MAX_CHARS, currentSong))
+					stationData, err := queryStation(currentStation)
 					if err != nil {
-						log.Println(err)
-						break
+						log.Println("Received error")
+						continue
 					}
-					lines := strings.Split(string(data[:]), "\n")
-					for _, line := range lines {
-						// Log, if enabled, the output of StreamPlayer
-						if *loggingToFilePtr {
-							log.Print("[" + streamPlayer.player_name + "] " + line)
-						}
-						if strings.Contains(line, "Output #0") {
-							playStatus = Playing
-							playButton.SetText("")
-						}
-						// Check if there's an updated title and reflect it on the
-						// GUI
-						if strings.Contains(line, "StreamTitle: ") {
-							log.Println("Found new stream title, updating GUI")
-							newTitleParts := strings.Split(line, "StreamTitle: ")
-							currentSong = newTitleParts[1]
-							currentSongScrollIndex = 0
-							albumCard.SetSubTitle(fmt.Sprintf("%.*s", MAX_CHARS, currentSong))
-							stationData, err := queryStation()
-							if err != nil {
-								log.Println("Received error")
-								continue
-							}
 
-							// Cover art retrieval
-							var coverArtURL string
-							if stationData.Live.IsLive {
-								log.Printf("Received %s as art", stationData.Live.Art)
-								albumCard.SetTitle("Live Show")
-								coverArtURL = stationData.Live.Art
-							} else {
-								log.Printf("Received %s as art", stationData.NowPlaying.Song.Art)
-								albumCard.SetTitle("Now playing")
-								coverArtURL = stationData.NowPlaying.Song.Art
-							}
+					// Cover art retrieval
+					var coverArtURL string
+					if stationData.Live.IsLive {
+						log.Printf("Received %s as art", stationData.Live.Art)
+						albumCard.SetTitle("Live Show")
+						coverArtURL = stationData.Live.Art
+					} else {
+						log.Printf("Received %s as art", stationData.NowPlaying.Song.Art)
+						albumCard.SetTitle("Now playing")
+						coverArtURL = stationData.NowPlaying.Song.Art
+					}
 
-							if len(coverArtURL) > 0 {
-								log.Println("Fetching album art")
-								albumImg := loadImageURL(coverArtURL)
-								albumCanvas := canvas.NewImageFromImage(albumImg)
-								albumCanvas.SetMinSize(fyne.NewSize(200, 200))
-								albumCard.SetContent(albumCanvas)
-							} else {
-								albumCanvas := canvas.NewImageFromImage(radioSpiralAvatar)
-								albumCanvas.SetMinSize(fyne.NewSize(200, 200))
-								albumCard.SetContent(albumCanvas)
-							}
-						}
+					if len(coverArtURL) > 0 {
+						log.Println("Fetching album art")
+						albumImg := loadImageURL(coverArtURL)
+						albumCanvas := canvas.NewImageFromImage(albumImg)
+						albumCanvas.SetMinSize(fyne.NewSize(200, 200))
+						albumCard.SetContent(albumCanvas)
+					} else {
+						albumCanvas := canvas.NewImageFromImage(radioSpiralAvatar)
+						albumCanvas.SetMinSize(fyne.NewSize(200, 200))
+						albumCard.SetContent(albumCanvas)
 					}
 				}
-			} else {
-				// To avoid high CPU usage, we wait some milliseconds before testing
-				// again for the change in streamPlayer.out from nil to ReadCloser
+			}
+			if err := scanner.Err(); err != nil {
+				log.Println("FFMpeg stream not ready or ended. Waiting before restarting")
 				time.Sleep(200 * time.Millisecond)
+				scanner = bufio.NewScanner(streamPlayer.out)
 			}
 		}
 	}()
@@ -372,13 +340,22 @@ func main() {
 		log.Println("Error generating RadioSpiral url")
 	}
 
+	controlContainer := container.NewBorder(
+		nil,
+		nil,
+		volumeMute,
+		volumeTop,
+		playButton,
+	)
+
 	// Layout the whole thing
 	window.SetContent(container.NewVBox(
 		radioSpiralHeaderImage,
 		container.NewCenter(widget.NewHyperlink("https://radiospiral.net", rsUrl)),
+		container.NewPadded(stationSelect),
 		centerCardContainer,
+		volumeContainer,
 		controlContainer,
-		playButton,
 	))
 
 	// This small go routine will scroll the song title on the card if it is longer than MAX_CHARS
@@ -400,8 +377,15 @@ func main() {
 		}
 	}()
 
+	// If the window is closed, clean all stuff
+	window.SetOnClosed(func() {
+		streamPlayer.Close()
+		appRunning = false
+		if logFile != nil {
+			defer logFile.Close()
+		}
+	})
+
 	// Showtime!
 	window.ShowAndRun()
-	appRunning = false
-	streamPlayer.Close()
 }
