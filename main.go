@@ -360,16 +360,28 @@ func main() {
 
 	// This small go routine will scroll the song title on the card if it is longer than MAX_CHARS
 	go func() {
+		forwardDir := true
 		for {
 			if !appRunning {
 				break
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(400 * time.Millisecond)
 			if len(currentSong) > MAX_CHARS {
 				topIndex := len(currentSong) - MAX_CHARS
-				currentSongScrollIndex += 1
-				if currentSongScrollIndex > topIndex {
-					currentSongScrollIndex = 0
+				if forwardDir {
+					currentSongScrollIndex += 1
+					if currentSongScrollIndex > topIndex {
+						currentSongScrollIndex = topIndex
+						time.Sleep(1 * time.Second)
+						forwardDir = false
+					}
+				} else {
+					currentSongScrollIndex -= 1
+					if currentSongScrollIndex < 0 {
+						currentSongScrollIndex = 0
+						time.Sleep(1 * time.Second)
+						forwardDir = true
+					}
 				}
 				scrolledTitle := currentSong[currentSongScrollIndex : currentSongScrollIndex+MAX_CHARS]
 				albumCard.SetSubTitle(scrolledTitle)
