@@ -385,6 +385,8 @@ func main() {
 				}
 				scrolledTitle := currentSong[currentSongScrollIndex : currentSongScrollIndex+MAX_CHARS]
 				albumCard.SetSubTitle(scrolledTitle)
+			} else {
+				currentSongScrollIndex = 0
 			}
 		}
 	}()
