@@ -33,6 +33,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -42,8 +43,7 @@ var RadioSpiralHost = "spiral.radio"
 const STATIONS_QUERY_URL = "/api/stations"
 const NOWPLAYING_URL = "/api/nowplaying/"
 const RADIOSPIRAL_CONFIG = "https://raw.githubusercontent.com/joemcmahon/radiospiral-config/refs/heads/master/config.json"
-
-const REMOVE_TEST_STATION = "rstest"
+const RADIOSPIRAL_TEST_CONFIG = "https://raw.githubusercontent.com/joemcmahon/radiospiral-config/refs/heads/master/config-test.json"
 
 type RadioSpiralConfig struct {
 	Configs []ConfigItem `json:"configs"`
@@ -165,25 +165,19 @@ func queryStation(station StationInfo) (*StationResponse, error) {
 }
 
 // Query the stations available
-func fetchStations() ([]StationInfo, error) {
-	resp, err := http.Get("https://" + RadioSpiralHost + STATIONS_QUERY_URL)
+func fetchStations(isTest bool) ([]StationInfo, error) {
+	RadioSpiralHost, stationsExcluded, err := fetchRadioSpiralConfig(isTest)
+
 	if err != nil {
-		// If we get an error fetching the data, note it down, try with the config at RadioSpiral's Github
-		log.Println("[ERROR] Error when querying available stations")
+		return nil, err
+	}
+
+	resp, err := http.Get("https://" + RadioSpiralHost + STATIONS_QUERY_URL)
+
+	if err != nil {
+		log.Println("[ERROR] Error when querying available stations at new host " + RadioSpiralHost)
 		log.Println(err)
-		RadioSpiralHost, err = fetchRadioSpiralConfig()
-
-		if err != nil {
-			return nil, err
-		}
-
-		resp, err = http.Get("https://" + RadioSpiralHost + STATIONS_QUERY_URL)
-
-		if err != nil {
-			log.Println("[ERROR] Error when querying available stations at new host " + RadioSpiralHost)
-			log.Println(err)
-			return nil, err
-		}
+		return nil, err
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -202,7 +196,7 @@ func fetchStations() ([]StationInfo, error) {
 	stations := make([]StationInfo, 0)
 	for _, elem := range response {
 		// We filter the test station
-		if elem.Shortcode != REMOVE_TEST_STATION {
+		if !slices.Contains(stationsExcluded, elem.Shortcode) {
 			stations = append(stations, elem)
 		}
 	}
@@ -210,15 +204,21 @@ func fetchStations() ([]StationInfo, error) {
 	return stations, nil
 }
 
-// In case of error, query Github and retrieve a possible new alternative host
-func fetchRadioSpiralConfig() (string, error) {
-	resp, err := http.Get(RADIOSPIRAL_CONFIG)
+// Query Github and retrieve a possible new alternative host
+func fetchRadioSpiralConfig(isTest bool) (string, []string, error) {
+	var configUrl string
+	if isTest {
+		configUrl = RADIOSPIRAL_TEST_CONFIG
+	} else {
+		configUrl = RADIOSPIRAL_CONFIG
+	}
+	resp, err := http.Get(configUrl)
 
 	if err != nil {
 		// Oh... maybe the net is down?
 		log.Println("[ERROR] Couldn't reach Github for configuration data")
 		log.Println(err)
-		return "", err
+		return "", nil, err
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -228,24 +228,26 @@ func fetchRadioSpiralConfig() (string, error) {
 		// Oops... error reading the body!
 		log.Println("[ERROR] Couldn't read Github configuration data")
 		log.Println(err)
-		return "", err
+		return "", nil, err
 	}
 
 	var response RadioSpiralConfig
 	json.Unmarshal(body, &response)
 
 	foundHost := ""
+	var stationsExcluded []string
 
 	for _, config := range response.Configs {
 		if config.Format == "azuracast" {
 			foundHost = config.Server
+			stationsExcluded = config.Exclude
 		}
 	}
 
 	if len(foundHost) == 0 {
 		log.Println("[ERROR] There was no server configuration found")
-		return "", fmt.Errorf("Host configuration not found")
+		return "", nil, fmt.Errorf("Host configuration not found")
 	}
 
-	return foundHost, nil
+	return foundHost, stationsExcluded, nil
 }

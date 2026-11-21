@@ -94,12 +94,6 @@ func main() {
 	// Logfile
 	var logFile *os.File
 
-	stations, err := fetchStations()
-
-	check(err)
-
-	currentStation := stations[0]
-
 	appRunning := true
 
 	PLAYER_CMD := "ffmpeg"
@@ -116,8 +110,11 @@ func main() {
 
 	// Command line arguments parsing
 	loggingToFilePtr := flag.Bool("log", false, "Create a log file")
+	testStation := flag.Bool("test", false, "")
 
 	flag.Parse()
+
+	var err error
 
 	if *loggingToFilePtr {
 		logFile, err = initLogging()
@@ -127,6 +124,12 @@ func main() {
 	}
 
 	log.Println("Starting the app")
+
+	log.Println("Fetching the stations configuration")
+	stations, err := fetchStations(*testStation)
+	check(err)
+
+	currentStation := stations[0]
 
 	// Create the status channel, to read from StreamPlayer and the pipe to send commands to it
 	// pipe_chan := make(chan io.ReadCloser)
