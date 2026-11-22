@@ -28,18 +28,45 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"image"
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 )
 
 // Main RadioSpiral
-const STATIONS_QUERY_URL = "https://spiral.radio/api/stations"
-const NOWPLAYING_URL = "https://radiospiral.radio/api/nowplaying/"
+var RadioSpiralHost = "spiral.radio"
 
-const REMOVE_TEST_STATION = "rstest"
+const STATIONS_QUERY_URL = "/api/stations"
+const NOWPLAYING_URL = "/api/nowplaying/"
+const RADIOSPIRAL_CONFIG = "https://raw.githubusercontent.com/joemcmahon/radiospiral-config/refs/heads/master/config.json"
+const RADIOSPIRAL_TEST_CONFIG = "https://raw.githubusercontent.com/joemcmahon/radiospiral-config/refs/heads/master/config-test.json"
+const RADIOSPIRAL_CREDITS = "https://raw.githubusercontent.com/joemcmahon/radiospiral-config/refs/heads/master/credits.json"
+
+// Config structures on Github
+type RadioSpiralConfig struct {
+	Configs []ConfigItem `json:"configs"`
+}
+
+type ConfigItem struct {
+	Format   string   `json:"format"`
+	Server   string   `json:"server"`
+	Exclude  []string `json:"exclude"`
+	Stations []any    `json:"stations"`
+}
+
+// Credits data
+type Credits struct {
+	Credits []Credit `json:"credits"`
+}
+
+type Credit struct {
+	Role string
+	Name string
+}
 
 type StationInfo struct {
 	Id              int    `json:"id"`
@@ -124,7 +151,7 @@ func loadImageURL(url string) image.Image {
 
 // Query the station info
 func queryStation(station StationInfo) (*StationResponse, error) {
-	apiEndpoint := NOWPLAYING_URL + station.Shortcode
+	apiEndpoint := "https://" + RadioSpiralHost + NOWPLAYING_URL + station.Shortcode
 	resp, err := http.Get(apiEndpoint)
 	if err != nil {
 		// If we get an error fetching the data, await a minute and retry
@@ -150,11 +177,17 @@ func queryStation(station StationInfo) (*StationResponse, error) {
 }
 
 // Query the stations available
-func fetchStations() ([]StationInfo, error) {
-	resp, err := http.Get(STATIONS_QUERY_URL)
+func fetchStations(isTest bool) ([]StationInfo, error) {
+	RadioSpiralHost, stationsExcluded, err := fetchRadioSpiralConfig(isTest)
+
 	if err != nil {
-		// If we get an error fetching the data, await a minute and retry
-		log.Println("[ERROR] Error when querying available stations")
+		return nil, err
+	}
+
+	resp, err := http.Get("https://" + RadioSpiralHost + STATIONS_QUERY_URL)
+
+	if err != nil {
+		log.Println("[ERROR] Error when querying available stations at new host " + RadioSpiralHost)
 		log.Println(err)
 		return nil, err
 	}
@@ -175,10 +208,84 @@ func fetchStations() ([]StationInfo, error) {
 	stations := make([]StationInfo, 0)
 	for _, elem := range response {
 		// We filter the test station
-		if elem.Shortcode != REMOVE_TEST_STATION {
+		if !slices.Contains(stationsExcluded, elem.Shortcode) {
 			stations = append(stations, elem)
 		}
 	}
 
 	return stations, nil
+}
+
+// Query Github and retrieve a possible new alternative host
+func fetchRadioSpiralConfig(isTest bool) (string, []string, error) {
+	var configUrl string
+	if isTest {
+		configUrl = RADIOSPIRAL_TEST_CONFIG
+	} else {
+		configUrl = RADIOSPIRAL_CONFIG
+	}
+	resp, err := http.Get(configUrl)
+
+	if err != nil {
+		// Oh... maybe the net is down?
+		log.Println("[ERROR] Couldn't reach Github for configuration data")
+		log.Println(err)
+		return "", nil, err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
+
+	if err != nil {
+		// Oops... error reading the body!
+		log.Println("[ERROR] Couldn't read Github configuration data")
+		log.Println(err)
+		return "", nil, err
+	}
+
+	var response RadioSpiralConfig
+	json.Unmarshal(body, &response)
+
+	foundHost := ""
+	var stationsExcluded []string
+
+	for _, config := range response.Configs {
+		if config.Format == "azuracast" {
+			foundHost = config.Server
+			stationsExcluded = config.Exclude
+		}
+	}
+
+	if len(foundHost) == 0 {
+		log.Println("[ERROR] There was no server configuration found")
+		return "", nil, fmt.Errorf("Host configuration not found")
+	}
+
+	return foundHost, stationsExcluded, nil
+}
+
+// Get the credits
+func fetchCredits() (Credits, error) {
+	resp, err := http.Get(RADIOSPIRAL_CREDITS)
+
+	if err != nil {
+		log.Println("[ERROR] Couldn't fetch the credits file")
+		log.Println(err)
+		return Credits{}, err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
+
+	if err != nil {
+		// Oops... error reading the body!
+		log.Println("[ERROR] Couldn't read Github credits data")
+		log.Println(err)
+		return Credits{}, err
+	}
+
+	var response Credits
+	json.Unmarshal(body, &response)
+
+	return response, nil
 }
