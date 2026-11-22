@@ -140,6 +140,7 @@ func main() {
 	// Create our app and window
 	app := app.New()
 	window := app.NewWindow("RadioSpiral Player")
+	aboutWindow := app.NewWindow("About RadioSpiral")
 
 	window.Resize(fyne.NewSize(400, 450))
 	window.SetIcon(resourceIconPng)
@@ -151,6 +152,12 @@ func main() {
 	radioSpiralHeaderImage := canvas.NewImageFromResource(resourceHeaderPng)
 	radioSpiralHeaderImage.SetMinSize(fyne.NewSize(400, 120))
 	radioSpiralHeaderImage.FillMode = canvas.ImageFillContain
+
+	createAboutWindow(aboutWindow, radioSpiralHeaderImage)
+
+	aboutButton := widget.NewButton("About us", func() {
+		aboutWindow.Show()
+	})
 
 	// Placeholder avatar
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
@@ -257,14 +264,6 @@ func main() {
 	volumeContainer := container.NewBorder(
 		nil,
 		nil,
-		//	container.NewHBox(
-		//		volumeMute,
-		//		volumeDown,
-		//	),
-		//	container.NewHBox(
-		//		volumeUp,
-		//		volumeTop,
-		//	),
 		volumeDown,
 		volumeUp,
 		volumeBar,
@@ -355,6 +354,7 @@ func main() {
 	window.SetContent(container.NewVBox(
 		radioSpiralHeaderImage,
 		container.NewCenter(widget.NewHyperlink("https://radiospiral.net", rsUrl)),
+		container.NewCenter(aboutButton),
 		container.NewPadded(stationSelect),
 		centerCardContainer,
 		volumeContainer,
@@ -405,4 +405,33 @@ func main() {
 
 	// Showtime!
 	window.ShowAndRun()
+}
+
+func createAboutWindow(aboutWindow fyne.Window, radioSpiralHeaderImage *canvas.Image) {
+	closeButton := widget.NewButton("Close", func() {
+		aboutWindow.Close()
+	})
+
+	credits, err := fetchCredits()
+
+	if err != nil {
+		aboutWindow.SetContent(container.NewVBox(
+			radioSpiralHeaderImage,
+			container.NewCenter(
+				closeButton,
+			),
+		))
+		return
+	}
+
+	elements := container.NewVBox(radioSpiralHeaderImage)
+
+	for _, credit := range credits.Credits {
+		line := widget.NewLabel(credit.Name + " - " + credit.Role)
+		elements.Add(container.NewCenter(line))
+	}
+
+	elements.Add(closeButton)
+
+	aboutWindow.SetContent(elements)
 }

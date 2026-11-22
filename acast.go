@@ -44,7 +44,9 @@ const STATIONS_QUERY_URL = "/api/stations"
 const NOWPLAYING_URL = "/api/nowplaying/"
 const RADIOSPIRAL_CONFIG = "https://raw.githubusercontent.com/joemcmahon/radiospiral-config/refs/heads/master/config.json"
 const RADIOSPIRAL_TEST_CONFIG = "https://raw.githubusercontent.com/joemcmahon/radiospiral-config/refs/heads/master/config-test.json"
+const RADIOSPIRAL_CREDITS = "https://raw.githubusercontent.com/joemcmahon/radiospiral-config/refs/heads/master/credits.json"
 
+// Config structures on Github
 type RadioSpiralConfig struct {
 	Configs []ConfigItem `json:"configs"`
 }
@@ -54,6 +56,16 @@ type ConfigItem struct {
 	Server   string   `json:"server"`
 	Exclude  []string `json:"exclude"`
 	Stations []any    `json:"stations"`
+}
+
+// Credits data
+type Credits struct {
+	Credits []Credit `json:"credits"`
+}
+
+type Credit struct {
+	Role string
+	Name string
 }
 
 type StationInfo struct {
@@ -250,4 +262,30 @@ func fetchRadioSpiralConfig(isTest bool) (string, []string, error) {
 	}
 
 	return foundHost, stationsExcluded, nil
+}
+
+// Get the credits
+func fetchCredits() (Credits, error) {
+	resp, err := http.Get(RADIOSPIRAL_CREDITS)
+
+	if err != nil {
+		log.Println("[ERROR] Couldn't fetch the credits file")
+		log.Println(err)
+		return Credits{}, err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
+
+	if err != nil {
+		// Oops... error reading the body!
+		log.Println("[ERROR] Couldn't read Github credits data")
+		log.Println(err)
+		return Credits{}, err
+	}
+
+	var response Credits
+	json.Unmarshal(body, &response)
+
+	return response, nil
 }
