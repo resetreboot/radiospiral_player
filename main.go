@@ -408,8 +408,14 @@ func main() {
 }
 
 func createAboutWindow(aboutWindow fyne.Window, radioSpiralHeaderImage *canvas.Image) {
+	// Just hide the window
+	aboutWindow.SetCloseIntercept(func() {
+		aboutWindow.Hide()
+	})
+
+	// Just hide the window
 	closeButton := widget.NewButton("Close", func() {
-		aboutWindow.Close()
+		aboutWindow.Hide()
 	})
 
 	credits, err := fetchCredits()
