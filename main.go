@@ -40,7 +40,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -50,9 +49,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/data/binding"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -64,6 +60,17 @@ const (
 	Playing
 	Stopped
 )
+
+// App status information goes into this struct
+type AppStatus struct {
+	AppRunning             bool
+	Stations               []StationInfo
+	CurrentStation         StationInfo
+	StreamPlayer           StreamPlayer
+	CurrentSong            string
+	CurrentSongScrollIndex int
+	PlayStatus             int
+}
 
 // helper
 func check(err error) {
@@ -86,15 +93,14 @@ func initLogging() (*os.File, error) {
 }
 
 func main() {
-	// Here we store the current song, since we will be using in
-	// several places
-	var currentSong string
-	var currentSongScrollIndex int
+	// Create the main App struct to hold all the necessary data that
+	// we need to keep the app status shared
+	appStatus := AppStatus{}
 
 	// Logfile
 	var logFile *os.File
 
-	appRunning := true
+	appStatus.AppRunning = true
 
 	PLAYER_CMD := "ffmpeg"
 
@@ -126,38 +132,21 @@ func main() {
 	log.Println("Starting the app")
 
 	log.Println("Fetching the stations configuration")
-	stations, err := fetchStations(*testStation)
+	appStatus.Stations, err = fetchStations(*testStation)
 	check(err)
 
-	currentStation := stations[0]
+	appStatus.CurrentStation = appStatus.Stations[0]
 
 	// Create the status channel, to read from StreamPlayer and the pipe to send commands to it
 	// pipe_chan := make(chan io.ReadCloser)
 
 	// Create our StreamPlayer instance
-	streamPlayer := StreamPlayer{player_name: PLAYER_CMD}
+	appStatus.StreamPlayer = StreamPlayer{player_name: PLAYER_CMD}
 
 	// Create our app and window
 	app := app.New()
 	window := app.NewWindow("RadioSpiral Player")
 	aboutWindow := app.NewWindow("About RadioSpiral")
-
-	window.Resize(fyne.NewSize(400, 450))
-	window.SetIcon(resourceIconPng)
-
-	// Keep the status of the player
-	playStatus := Stopped
-
-	// Header section
-	radioSpiralHeaderImage := canvas.NewImageFromResource(resourceHeaderPng)
-	radioSpiralHeaderImage.SetMinSize(fyne.NewSize(400, 120))
-	radioSpiralHeaderImage.FillMode = canvas.ImageFillContain
-
-	createAboutWindow(aboutWindow, radioSpiralHeaderImage)
-
-	aboutButton := widget.NewButton("About us", func() {
-		aboutWindow.Show()
-	})
 
 	// Placeholder avatar
 	radioSpiralAvatar := loadImageURL("https://radiospiral.net/wp-content/uploads/2018/03/Radio-Spiral-Logo-1.png")
@@ -166,115 +155,22 @@ func main() {
 	radioSpiralCanvas := canvas.NewImageFromImage(radioSpiralAvatar)
 	radioSpiralCanvas.SetMinSize(fyne.NewSize(200, 200))
 	albumCard := widget.NewCard("Now playing", "", radioSpiralCanvas)
-	centerCardContainer := container.NewCenter(albumCard)
 
-	volumeBind := binding.BindFloat(&streamPlayer.currentVolume)
-	volumeBar := widget.NewProgressBarWithData(volumeBind)
+	playButton, err := createMainWindow(window, aboutWindow, albumCard, &appStatus)
 
-	// Player section
-	volumeDown := widget.NewButtonWithIcon("", theme.VolumeDownIcon(), func() {
-		streamPlayer.DecVolume()
-		volumeBind.Reload()
-	})
-	volumeUp := widget.NewButtonWithIcon("", theme.VolumeUpIcon(), func() {
-		streamPlayer.IncVolume()
-		volumeBind.Reload()
-	})
-
-	var volumeMute *widget.Button
-
-	volumeMute = widget.NewButtonWithIcon("", theme.VolumeMuteIcon(), func() {
-		streamPlayer.Mute()
-		if streamPlayer.IsMuted() {
-			volumeMute.SetText("x")
-		} else {
-			volumeMute.SetText("")
-		}
-		volumeBind.Reload()
-	})
-
-	volumeTop := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
-		streamPlayer.SetVolume(1.0)
-		streamPlayer.currentVolume = 1.0
-		volumeBind.Reload()
-	})
-
-	// Station selector
-	var stationSelect *widget.Select
-	stationNames := make([]string, len(stations))
-
-	for i, elem := range stations {
-		stationNames[i] = elem.Name
+	if err != nil {
+		log.Fatal("Couldn't create main window")
 	}
 
-	stationSelect = widget.NewSelect(stationNames,
-		func(r string) {
-			idx := stationSelect.SelectedIndex()
-			currentStation = stations[idx]
-
-			if streamPlayer.IsPlaying() {
-				volume := streamPlayer.GetVolume()
-				streamPlayer.Stop()
-				streamPlayer.Load(currentStation.ListenUrl)
-				streamPlayer.Play()
-				streamPlayer.SetVolume(volume)
-				volumeBind.Reload()
-			}
-		})
-
-	stationSelect.SetSelectedIndex(0)
-	stationSelect.Resize(fyne.NewSize(300, 20))
-
-	if len(stations) == 1 {
-		// No need to show extra stations if they are not present
-		stationSelect.Hide()
-	}
-
-	// Play button
-	var playButton *widget.Button
-
-	playButton = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
-		// Here we control each time the button is pressed and update its
-		// appearance anytime it is clicked. We make the player start playing
-		// or pause.
-		if !streamPlayer.IsPlaying() {
-			playButton.SetIcon(theme.MediaStopIcon())
-			playButton.SetText("(Buffering)")
-			streamPlayer.Load(currentStation.ListenUrl)
-			streamPlayer.Play()
-			playStatus = Loading
-		} else {
-			if playStatus == Playing {
-				playStatus = Stopped
-				playButton.SetIcon(theme.MediaPlayIcon())
-				streamPlayer.Stop()
-			} else {
-				playStatus = Loading
-				playButton.SetText("(Buffering)")
-				playButton.SetIcon(theme.MediaStopIcon())
-				streamPlayer.Load(currentStation.ListenUrl)
-				streamPlayer.Play()
-			}
-		}
-		volumeBind.Reload()
-	})
-
-	playButton.Importance = widget.HighImportance
-
-	volumeContainer := container.NewBorder(
-		nil,
-		nil,
-		volumeDown,
-		volumeUp,
-		volumeBar,
-	)
+	// Keep the status of the player
+	appStatus.PlayStatus = Stopped
 
 	// Process the output of ffmpeg here in a separate goroutine
 	go func() {
 		var scanner *bufio.Scanner
 		for {
-			if streamPlayer.out != nil {
-				scanner = bufio.NewScanner(streamPlayer.out)
+			if appStatus.StreamPlayer.out != nil {
+				scanner = bufio.NewScanner(appStatus.StreamPlayer.out)
 			} else {
 				time.Sleep(20 * time.Millisecond)
 				continue
@@ -283,10 +179,10 @@ func main() {
 				line := scanner.Text()
 				// Log, if enabled, the output of StreamPlayer
 				if *loggingToFilePtr {
-					log.Print("[" + streamPlayer.player_name + "] " + line)
+					log.Print("[" + appStatus.StreamPlayer.player_name + "] " + line)
 				}
 				if strings.Contains(line, "Output #0") {
-					playStatus = Playing
+					appStatus.PlayStatus = Playing
 					playButton.SetText("")
 				}
 				// Check if there's an updated title and reflect it on the
@@ -294,10 +190,10 @@ func main() {
 				if strings.Contains(line, "StreamTitle: ") {
 					log.Println("Found new stream title, updating GUI")
 					newTitleParts := strings.Split(line, "StreamTitle: ")
-					currentSong = newTitleParts[1]
-					currentSongScrollIndex = 0
-					albumCard.SetSubTitle(fmt.Sprintf("%.*s", MAX_CHARS, currentSong))
-					stationData, err := queryStation(currentStation)
+					appStatus.CurrentSong = newTitleParts[1]
+					appStatus.CurrentSongScrollIndex = 0
+					albumCard.SetSubTitle(fmt.Sprintf("%.*s", MAX_CHARS, appStatus.CurrentSong))
+					stationData, err := queryStation(appStatus.CurrentStation)
 					if err != nil {
 						log.Println("Received error")
 						continue
@@ -331,73 +227,56 @@ func main() {
 			if err := scanner.Err(); err != nil {
 				log.Println("FFMpeg stream not ready or ended. Waiting before restarting")
 				time.Sleep(200 * time.Millisecond)
-				scanner = bufio.NewScanner(streamPlayer.out)
+				scanner = bufio.NewScanner(appStatus.StreamPlayer.out)
 			}
 		}
 	}()
-
-	rsUrl, err := url.Parse("https://radiospiral.net")
-
-	if err != nil {
-		log.Println("Error generating RadioSpiral url")
-	}
-
-	controlContainer := container.NewBorder(
-		nil,
-		nil,
-		volumeMute,
-		volumeTop,
-		playButton,
-	)
-
-	// Layout the whole thing
-	window.SetContent(container.NewVBox(
-		radioSpiralHeaderImage,
-		container.NewCenter(widget.NewHyperlink("https://radiospiral.net", rsUrl)),
-		container.NewCenter(aboutButton),
-		container.NewPadded(stationSelect),
-		centerCardContainer,
-		volumeContainer,
-		controlContainer,
-	))
 
 	// This small go routine will scroll the song title on the card if it is longer than MAX_CHARS
 	go func() {
 		forwardDir := true
 		for {
-			if !appRunning {
+			if !appStatus.AppRunning {
 				break
 			}
 			time.Sleep(400 * time.Millisecond)
-			if len(currentSong) > MAX_CHARS {
-				topIndex := len(currentSong) - MAX_CHARS
+			if len(appStatus.CurrentSong) > MAX_CHARS {
+				topIndex := len(appStatus.CurrentSong) - MAX_CHARS
 				if forwardDir {
-					currentSongScrollIndex += 1
-					if currentSongScrollIndex > topIndex {
-						currentSongScrollIndex = topIndex
+					appStatus.CurrentSongScrollIndex += 1
+					if appStatus.CurrentSongScrollIndex > topIndex {
+						appStatus.CurrentSongScrollIndex = topIndex
 						time.Sleep(1 * time.Second)
 						forwardDir = false
 					}
 				} else {
-					currentSongScrollIndex -= 1
-					if currentSongScrollIndex < 0 {
-						currentSongScrollIndex = 0
+					appStatus.CurrentSongScrollIndex -= 1
+					if appStatus.CurrentSongScrollIndex < 0 {
+						appStatus.CurrentSongScrollIndex = 0
 						time.Sleep(1 * time.Second)
 						forwardDir = true
 					}
 				}
-				scrolledTitle := currentSong[currentSongScrollIndex : currentSongScrollIndex+MAX_CHARS]
+				scrolledTitle := appStatus.CurrentSong[appStatus.CurrentSongScrollIndex : appStatus.CurrentSongScrollIndex+MAX_CHARS]
 				albumCard.SetSubTitle(scrolledTitle)
 			} else {
-				currentSongScrollIndex = 0
+				appStatus.CurrentSongScrollIndex = 0
 			}
 		}
 	}()
 
 	// If the window is closed, clean all stuff
 	window.SetOnClosed(func() {
-		streamPlayer.Close()
-		appRunning = false
+		// Make sure we stop the player
+		if appStatus.StreamPlayer.IsPlaying() {
+			appStatus.StreamPlayer.Stop()
+		}
+		// Give it some time to stop
+		time.Sleep(100 * time.Millisecond)
+		appStatus.StreamPlayer.Close()
+		// And to close properly
+		time.Sleep(100 * time.Millisecond)
+		appStatus.AppRunning = false
 		if logFile != nil {
 			defer logFile.Close()
 		}
@@ -405,39 +284,4 @@ func main() {
 
 	// Showtime!
 	window.ShowAndRun()
-}
-
-func createAboutWindow(aboutWindow fyne.Window, radioSpiralHeaderImage *canvas.Image) {
-	// Just hide the window
-	aboutWindow.SetCloseIntercept(func() {
-		aboutWindow.Hide()
-	})
-
-	// Just hide the window
-	closeButton := widget.NewButton("Close", func() {
-		aboutWindow.Hide()
-	})
-
-	credits, err := fetchCredits()
-
-	if err != nil {
-		aboutWindow.SetContent(container.NewVBox(
-			radioSpiralHeaderImage,
-			container.NewCenter(
-				closeButton,
-			),
-		))
-		return
-	}
-
-	elements := container.NewVBox(radioSpiralHeaderImage)
-
-	for _, credit := range credits.Credits {
-		line := widget.NewLabel(credit.Name + " - " + credit.Role)
-		elements.Add(container.NewCenter(line))
-	}
-
-	elements.Add(closeButton)
-
-	aboutWindow.SetContent(elements)
 }
