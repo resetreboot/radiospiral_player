@@ -3,6 +3,7 @@
 
 GO=go build
 GO_OPTIONS=-buildmode=default
+WINDOWS_OPTIONS=-ldflags -H=windowsgui
 SOURCES=main.go acast.go radioplayer.go bundle.go gui.go
 
 
@@ -14,7 +15,7 @@ radiospiral: $(SOURCES)
 
 radiospiral.exe: $(SOURCES)
 	@echo "Building Windows AMD64..."
-	@env CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 $(GO) -o radiospiral.exe $(GO_OPTIONS) $(SOURCES)
+	@env CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 $(GO) -o radiospiral.exe $(GO_OPTIONS) $(WINDOWS_OPTIONS) $(SOURCES)
 
 radiospiral-arm64: $(SOURCES)
 	@echo "Building Linux ARM64..."
